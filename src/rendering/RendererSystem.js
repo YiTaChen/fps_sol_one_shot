@@ -1,4 +1,9 @@
 import * as THREE from "three";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { resolveQuality } from "../core/Quality.js";
 
 const _viewport = new THREE.Vector2();
@@ -112,6 +117,7 @@ export class RendererSystem {
     this.worldRoot.name = "WorldRoot";
     this.scene.add(this.worldRoot);
     this.installAtmosphere();
+    this.installPostProcessing();
     this.applyQuality(qualityName);
     this.resize();
   }
@@ -157,12 +163,36 @@ export class RendererSystem {
     this.viewScene.add(viewKey, viewFill);
   }
 
+  installPostProcessing() {
+    this.composer = new EffectComposer(this.renderer);
+    this.renderPass = new RenderPass(this.scene, this.camera);
+    this.ssaoPass = new SSAOPass(this.scene, this.camera, 1280, 720);
+    this.ssaoPass.kernelRadius = 7;
+    this.ssaoPass.minDistance = 0.002;
+    this.ssaoPass.maxDistance = 0.085;
+    this.bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(1280, 720),
+      0.095,
+      0.28,
+      0.88,
+    );
+    this.outputPass = new OutputPass();
+    this.composer.addPass(this.renderPass);
+    this.composer.addPass(this.ssaoPass);
+    this.composer.addPass(this.bloomPass);
+    this.composer.addPass(this.outputPass);
+  }
+
   applyQuality(name) {
     this.quality = resolveQuality(name);
     this.renderer.setPixelRatio(
       Math.min(window.devicePixelRatio || 1, this.quality.dpr),
     );
     this.renderer.shadowMap.enabled = this.quality.shadows;
+    this.ssaoPass.enabled = this.quality.name !== "low";
+    this.bloomPass.enabled = this.quality.name !== "low";
+    this.ssaoPass.kernelRadius = this.quality.name === "high" ? 7 : 5;
+    this.bloomPass.strength = this.quality.name === "high" ? 0.095 : 0.065;
     this.sun.shadow.mapSize.set(
       this.quality.shadowMap,
       this.quality.shadowMap,
@@ -184,14 +214,14 @@ export class RendererSystem {
     this.viewCamera.aspect = aspect;
     this.viewCamera.updateProjectionMatrix();
     this.renderer.getDrawingBufferSize(_viewport);
+    this.composer.setSize(safeWidth, safeHeight);
     return { width: _viewport.x, height: _viewport.y };
   }
 
   render() {
     this.sky.position.copy(this.camera.position);
     this.renderer.setRenderTarget(null);
-    this.renderer.clear(true, true, true);
-    this.renderer.render(this.scene, this.camera);
+    this.composer.render();
     this.renderer.clearDepth();
     this.renderer.render(this.viewScene, this.viewCamera);
   }
@@ -220,10 +250,12 @@ export class RendererSystem {
           : [];
       for (const material of materials) material.dispose();
     });
+    this.composer.dispose();
+    this.ssaoPass.dispose();
+    this.bloomPass.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
 }
 
 export default RendererSystem;
-

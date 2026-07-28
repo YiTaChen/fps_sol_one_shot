@@ -16,6 +16,10 @@
   user-select: none;
 }
 
+*[hidden] {
+  display: none !important;
+}
+
 html,
 body,
 #app {
@@ -66,4 +70,3 @@ select:focus-visible {
       rgba(226, 83, 72, 0.06) 12px 24px
     );
 }
-

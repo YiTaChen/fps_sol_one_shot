@@ -22,6 +22,8 @@ export class InputManager {
     this.justPressed = new Set();
     this.justReleased = new Set();
     this.buttons = new Set();
+    this.syntheticKeys = new Set();
+    this.syntheticButtons = new Set();
     this.pressedButtons = new Set();
     this.releasedButtons = new Set();
     this.lookX = 0;
@@ -99,7 +101,7 @@ export class InputManager {
   }
 
   isDown(code) {
-    return this.keys.has(code);
+    return this.keys.has(code) || this.syntheticKeys.has(code);
   }
 
   down(code) {
@@ -107,7 +109,9 @@ export class InputManager {
   }
 
   wasPressed(code) {
-    return this.justPressed.has(code);
+    const value = this.justPressed.has(code);
+    this.justPressed.delete(code);
+    return value;
   }
 
   pressed(code) {
@@ -121,11 +125,13 @@ export class InputManager {
   }
 
   wasReleased(code) {
-    return this.justReleased.has(code);
+    const value = this.justReleased.has(code);
+    this.justReleased.delete(code);
+    return value;
   }
 
   buttonDown(button) {
-    return this.buttons.has(button);
+    return this.buttons.has(button) || this.syntheticButtons.has(button);
   }
 
   buttonPressed(button) {
@@ -148,6 +154,46 @@ export class InputManager {
     this.wheel = 0;
   }
 
+  /**
+   * Deterministic development input. Normal builds never call this; the game
+   * exposes it only through the ?test=1 interface.
+   */
+  setSynthetic(record = {}) {
+    this.syntheticKeys.clear();
+    this.syntheticButtons.clear();
+    const aliases = {
+      forward: "KeyW",
+      backward: "KeyS",
+      left: "KeyA",
+      right: "KeyD",
+      sprint: "ShiftLeft",
+      crouch: "ControlLeft",
+      jump: "Space",
+      reload: "KeyR",
+      leanLeft: "KeyQ",
+      leanRight: "KeyE",
+    };
+    const keys = record.keys ?? record;
+    for (const [name, value] of Object.entries(keys)) {
+      if (!value) continue;
+      const code = aliases[name] || name;
+      if (/^(Key|Digit|Arrow|Shift|Control|Space)/.test(code)) {
+        if (!this.syntheticKeys.has(code)) this.justPressed.add(code);
+        this.syntheticKeys.add(code);
+      }
+    }
+    const buttons = record.buttons ?? {};
+    if (record.fire || buttons.left || buttons[0]) this.syntheticButtons.add(0);
+    if (record.ads || buttons.right || buttons[2]) this.syntheticButtons.add(2);
+    if (Number.isFinite(record.lookX)) this.lookX += record.lookX;
+    if (Number.isFinite(record.lookY)) this.lookY += record.lookY;
+  }
+
+  clearSynthetic() {
+    this.syntheticKeys.clear();
+    this.syntheticButtons.clear();
+  }
+
   resetTransient() {
     this.justPressed.clear();
     this.justReleased.clear();
@@ -161,6 +207,7 @@ export class InputManager {
   reset() {
     this.keys.clear();
     this.buttons.clear();
+    this.clearSynthetic();
     this.resetTransient();
   }
 

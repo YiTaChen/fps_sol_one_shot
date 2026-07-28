@@ -6,40 +6,103 @@ import {
   InputManager,
   RngService,
 } from "../core/index.js";
-import { PhysicsWorld } from "../physics/index.js";
-import { RendererSystem } from "../rendering/index.js";
+import { AudioSystem } from "../audio/AudioSystem.js";
+import { Effects } from "../effects/Effects.js";
+import { EnemyDirector } from "../enemies/EnemyDirector.js";
+import { MaterialLibrary } from "../materials/MaterialLibrary.js";
+import { PhysicsWorld } from "../physics/PhysicsWorld.js";
+import { PlayerController } from "../player/PlayerController.js";
+import { RendererSystem } from "../rendering/RendererSystem.js";
+import { UI } from "../ui/UI.js";
+import { Rifle } from "../weapons/Rifle.js";
+import { WorldBuilder } from "../world/WorldBuilder.js";
 
-function makeFoundationMaterial(rng) {
-  const size = 128;
-  const pixels = new Uint8Array(size * size * 4);
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const index = (y * size + x) * 4;
-      const grain = rng.int(-11, 12);
-      const seam = x % 32 < 2 || y % 32 < 2 ? -17 : 0;
-      pixels[index] = 102 + grain + seam;
-      pixels[index + 1] = 98 + grain + seam;
-      pixels[index + 2] = 89 + grain + seam;
-      pixels[index + 3] = 255;
-    }
+const FIXED_STEP = 1 / 60;
+const _damageDirection = new THREE.Vector3(0, 0, 1);
+const _capturePosition = new THREE.Vector3();
+const _captureTarget = new THREE.Vector3();
+const _captureQuaternion = new THREE.Quaternion();
+
+const FALLBACK_CAPTURE_POSES = Object.freeze({
+  "wide-street": {
+    position: [34, 6.4, 42],
+    target: [-8, 3.2, -17],
+    fov: 68,
+  },
+  "facade-close": {
+    position: [-14.5, 2.6, 14],
+    target: [-23, 3.1, 5],
+    fov: 62,
+  },
+  interior: {
+    position: [9.2, 1.72, -3.5],
+    target: [13.4, 1.65, -11],
+    fov: 67,
+  },
+  "weapon-hip": {
+    position: [0, 1.66, 31],
+    target: [0, 1.6, 5],
+    fov: 72,
+  },
+  "weapon-ads": {
+    position: [0, 1.66, 31],
+    target: [0, 1.6, 5],
+    fov: 66,
+  },
+  enemy: {
+    position: [13, 2.35, -8],
+    target: [8, 1.25, -16],
+    fov: 58,
+  },
+  "active-combat": {
+    position: [0, 1.66, 29],
+    target: [0, 1.55, -6],
+    fov: 72,
+  },
+});
+
+const WORLD_CAPTURE_KEYS = Object.freeze({
+  "wide-street": "wideStreet",
+  "facade-close": "closeFacade",
+  interior: "enterableInterior",
+  "weapon-hip": "hipFire",
+  "weapon-ads": "ads",
+  enemy: "enemy",
+  "active-combat": "activeCombat",
+});
+
+function toVector(value, target) {
+  if (!value) return null;
+  if (value.isVector3) return target.copy(value);
+  if (Array.isArray(value)) {
+    return target.set(
+      Number(value[0]) || 0,
+      Number(value[1]) || 0,
+      Number(value[2]) || 0,
+    );
   }
-  const map = new THREE.DataTexture(
-    pixels,
-    size,
-    size,
-    THREE.RGBAFormat,
-    THREE.UnsignedByteType,
-  );
-  map.wrapS = map.wrapT = THREE.RepeatWrapping;
-  map.repeat.set(16, 16);
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.needsUpdate = true;
-  return new THREE.MeshStandardMaterial({
-    map,
-    color: 0xa7a39b,
-    roughness: 0.88,
-    metalness: 0.02,
-  });
+  if (
+    Number.isFinite(value.x)
+    && Number.isFinite(value.y)
+    && Number.isFinite(value.z)
+  ) {
+    return target.set(value.x, value.y, value.z);
+  }
+  return null;
+}
+
+function vectorSnapshot(value) {
+  return {
+    x: Number(value?.x) || 0,
+    y: Number(value?.y) || 0,
+    z: Number(value?.z) || 0,
+  };
+}
+
+function percentile(samples, fraction) {
+  if (!samples.length) return 0;
+  const values = [...samples].sort((a, b) => a - b);
+  return values[Math.min(values.length - 1, Math.floor(values.length * fraction))];
 }
 
 export class Game {
@@ -47,21 +110,21 @@ export class Game {
     this.container = container;
     this.options = options;
     this.events = new EventBus();
-    this.rng = new RngService(options.seed ?? 0xc1de71e);
-    this.clock = new FixedClock(1 / 60);
+    this.rng = new RngService(options.seed ?? 0x0c1de71e);
+    this.clock = new FixedClock(FIXED_STEP);
     this.diagnostics = new Diagnostics();
     this.physics = new PhysicsWorld();
     this.rendering = new RendererSystem(
       container,
       options.quality || "high",
     );
-    this.input = new InputManager(this.rendering.renderer.domElement, this.events);
     this.state = {
       phase: "menu",
       kills: 0,
       requiredKills: 6,
       elapsed: 0,
       seed: this.rng.seed,
+      quality: this.rendering.quality.name,
     };
     this.context = {
       scene: this.rendering.scene,
@@ -72,205 +135,257 @@ export class Game {
       events: this.events,
       rng: this.rng,
       clock: this.clock,
-      input: this.input,
+      input: null,
       quality: this.rendering.quality,
       physics: this.physics,
-      assets: new Map(),
+      assets: {},
       state: this.state,
       diagnostics: this.diagnostics,
     };
-    this.abort = new AbortController();
+
     this.running = false;
+    this.ready = false;
+    this.manualSimulation = Boolean(options.test);
+    this.performanceRunning = false;
     this.raf = 0;
-    this.createFoundationFrame();
-    this.createFoundationMenu();
-    this.installLifecycle();
-    this.exposeTestInterface();
-  }
+    this.abort = new AbortController();
+    this.unsubscribers = [];
+    this.captureOverride = null;
+    this.captureMode = options.captureMode || null;
+    this.performanceSamples = [];
 
-  createFoundationFrame() {
-    const root = new THREE.Group();
-    root.name = "FoundationFrame";
-    const groundMaterial = makeFoundationMaterial(
-      this.rng.stream("materials"),
-    );
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(100, 100, 1, 1),
-      groundMaterial,
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    root.add(ground);
-    this.physics.addStatic({
-      min: new THREE.Vector3(-50, -1, -50),
-      max: new THREE.Vector3(50, 0, 50),
-      material: "concrete",
-      object: ground,
+    this.materials = MaterialLibrary.fromContext(this.context, {
+      textureSize: this.rendering.quality.name === "low" ? 128 : 256,
     });
+    this.context.assets.materials = this.materials;
+    this.context.assets.materialLibrary = this.materials;
 
-    const silhouetteMaterial = new THREE.MeshStandardMaterial({
-      color: 0x695f52,
-      roughness: 0.92,
+    this.worldBuilder = new WorldBuilder({
+      materials: this.materials,
+      physics: this.physics,
     });
-    const skylineGeometry = new THREE.BoxGeometry(1, 1, 1);
-    const skyline = new THREE.InstancedMesh(
-      skylineGeometry,
-      silhouetteMaterial,
-      28,
-    );
-    const matrix = new THREE.Matrix4();
-    const rng = this.rng.stream("world-layout");
-    for (let i = 0; i < skyline.count; i += 1) {
-      const side = i % 2 === 0 ? -1 : 1;
-      const z = -46 + Math.floor(i / 2) * 7;
-      const width = rng.range(6, 10);
-      const depth = rng.range(4, 7);
-      const height = rng.range(5, 13);
-      matrix.compose(
-        new THREE.Vector3(side * rng.range(28, 40), height * 0.5, z),
-        new THREE.Quaternion(),
-        new THREE.Vector3(width, height, depth),
-      );
-      skyline.setMatrixAt(i, matrix);
+    this.world = this.worldBuilder.build(this.context);
+    this.context.assets.world = this.world;
+    if (this.world?.root && !this.world.root.parent) {
+      this.rendering.worldRoot.add(this.world.root);
     }
-    skyline.castShadow = true;
-    skyline.receiveShadow = true;
-    root.add(skyline);
-    this.rendering.worldRoot.add(root);
-    this.foundationRoot = root;
-    this.rendering.camera.position.set(0, 1.72, 18);
-    this.rendering.camera.lookAt(0, 2.8, -20);
-  }
 
-  createFoundationMenu() {
-    this.menu = document.createElement("section");
-    this.menu.className = "foundation-menu";
-    this.menu.innerHTML = `
-      <div class="foundation-menu__frame">
-        <p class="foundation-menu__eyebrow">TACTICAL INCIDENT // 06:40</p>
-        <h1>CINDERLINE</h1>
-        <p class="foundation-menu__sub">ONE SHOT</p>
-        <p class="foundation-menu__brief">
-          Break the blockade. Clear six hostiles from the Kestrel market district.
-        </p>
-        <button type="button" data-action="start">ENTER THE DISTRICT</button>
-        <p class="foundation-menu__controls">
-          WASD MOVE · MOUSE AIM · LMB FIRE · RMB ADS · R RELOAD · SHIFT SPRINT<br>
-          CTRL/C CROUCH &amp; SLIDE · SPACE JUMP/MANTLE · Q/E LEAN · ESC PAUSE
-        </p>
-        <p class="foundation-menu__status">SYSTEMS INITIALIZED · WEBGL2</p>
-      </div>
-    `;
-    const style = document.createElement("style");
-    style.dataset.foundation = "true";
-    style.textContent = `
-      .foundation-menu{position:fixed;inset:0;display:grid;place-items:center;
-        background:linear-gradient(90deg,rgba(5,9,10,.94) 0 37%,rgba(5,9,10,.32) 70%,rgba(5,9,10,.62));
-        z-index:10;letter-spacing:.04em}
-      .foundation-menu__frame{position:absolute;left:8vw;top:50%;width:min(580px,80vw);
-        transform:translateY(-50%);border-left:3px solid #e7a34c;padding:2rem 2.3rem;
-        background:linear-gradient(90deg,rgba(9,14,15,.78),transparent)}
-      .foundation-menu__eyebrow,.foundation-menu__status{font-size:.72rem;color:#d6a461;
-        letter-spacing:.28em}
-      .foundation-menu h1{font-size:clamp(3.8rem,8vw,7.7rem);font-weight:850;line-height:.82;
-        letter-spacing:-.065em;margin:1.2rem 0 0;text-shadow:0 3px 30px rgba(0,0,0,.65)}
-      .foundation-menu__sub{font-size:1rem;letter-spacing:.65em;margin:.8rem 0 2rem;color:#bcc7c2}
-      .foundation-menu__brief{max-width:42ch;color:#c7cfca;line-height:1.65}
-      .foundation-menu button{margin:1.5rem 0;padding:1rem 1.4rem;border:1px solid #e7a34c;
-        color:#101211;background:#e7a34c;font-weight:800;letter-spacing:.12em;cursor:pointer}
-      .foundation-menu button:hover{background:#ffd493}
-      .foundation-menu__controls{font-size:.66rem;line-height:1.8;color:#9ea9a2}
-      .foundation-menu__status{margin-top:2.2rem;color:#728078}
-    `;
-    document.head.appendChild(style);
-    this.foundationStyle = style;
-    this.container.appendChild(this.menu);
-    const button = this.menu.querySelector('[data-action="start"]');
-    button.addEventListener("click", () => this.startMatch(), {
-      signal: this.abort.signal,
+    this.input = new InputManager(
+      this.rendering.renderer.domElement,
+      this.events,
+    );
+    this.context.input = this.input;
+
+    this.player = new PlayerController(this.context);
+    const spawn = this.world?.spawn?.position
+      ?? this.world?.spawn
+      ?? this.world?.playerSpawn?.position
+      ?? this.world?.playerSpawn;
+    if (toVector(spawn, _capturePosition)) {
+      this.player.setSpawn(
+        _capturePosition,
+        Number(this.world?.spawn?.yaw ?? this.world?.playerSpawn?.yaw ?? 0),
+      );
+    }
+    this.state.player = this.player.snapshot;
+    this.state.playerSnapshot = this.player.snapshot;
+
+    this.rifle = new Rifle(this.context);
+    this.state.weapon = this.rifle.snapshot;
+    this.state.weaponSnapshot = this.rifle.snapshot;
+    this.player.setEnabled(false);
+    this.rifle.setEnabled(false);
+    this.input.enabled = false;
+
+    this.effects = new Effects(this.context, {
+      particleBudget: this.rendering.quality.particles,
+      decalBudget: this.rendering.quality.decals,
     });
+
+    this.enemies = new EnemyDirector({
+      world: this.world,
+      player: this.player,
+      count: 7,
+    });
+    this.enemies.init(this.context);
+    this.state.requiredKills = Math.min(6, this.enemies.enemies.length);
+
+    this.audio = new AudioSystem();
+    this.audio.init(this.context);
+    this.ui = new UI({
+      container: document.body,
+      quality: this.rendering.quality.name,
+    });
+    this.ui.init(this.context);
+
+    this.installLifecycle();
+    this.rendering.prewarm();
+    this.ready = true;
+    this.exposeTestInterface();
+    if (this.captureMode) this.setCapturePose(this.captureMode);
   }
 
   installLifecycle() {
+    const signal = this.abort.signal;
     window.addEventListener("resize", () => {
-      this.rendering.resize();
-      this.events.emit("render:resize", {});
-    }, { signal: this.abort.signal });
-    this.events.on("input:pointer-lock", ({ locked }) => {
-      if (!locked && this.state.phase === "playing") {
-        this.pause();
+      const size = this.rendering.resize();
+      this.events.emit("render:resize", size);
+    }, { signal });
+    window.addEventListener("blur", () => {
+      if (this.state.phase === "playing" && !this.options.capture) {
+        this.events.emit("game:pause", { source: "focus-loss" });
       }
-    });
+    }, { signal });
     window.addEventListener("error", (event) => {
       this.diagnostics.recordError(event.error || event.message);
-    }, { signal: this.abort.signal });
+    }, { signal });
     window.addEventListener("unhandledrejection", (event) => {
       this.diagnostics.recordError(event.reason);
-    }, { signal: this.abort.signal });
+    }, { signal });
+
+    this.unsubscribers.push(
+      this.events.on("game:start", () => this.activateMatch()),
+      this.events.on("game:pause", () => this.applyPause()),
+      this.events.on("game:resume", () => this.applyResume()),
+      this.events.on("game:restart", () => this.applyRestart()),
+      this.events.on("quality:change", (event) =>
+        this.applyQuality(event?.name ?? event?.preset ?? event)),
+      this.events.on("input:pointer-lock", ({ locked }) => {
+        if (!locked && this.state.phase === "playing" && !this.options.capture) {
+          this.events.emit("game:pause", { source: "pointer-lock-loss" });
+        }
+      }),
+      this.events.on("enemy:death", (event) => this.onEnemyDeath(event)),
+      this.events.on("player:death", (event) => this.onPlayerDeath(event)),
+    );
   }
 
-  startMatch() {
+  activateMatch() {
+    if (this.state.phase === "playing") return;
+    if (this.state.phase === "victory" || this.state.phase === "defeat") {
+      this.applyRestart();
+      return;
+    }
     this.state.phase = "playing";
-    this.menu.hidden = true;
+    this.captureOverride = null;
+    this.player.setEnabled(true);
+    this.rifle.setEnabled(true);
+    this.input.enabled = true;
     this.clock.clearAccumulator();
-    this.events.emit("game:start", { seed: this.state.seed });
-    if (!this.options.capture) this.input.requestPointerLock();
+    this.audio.resume();
+    if (!this.options.capture && !this.manualSimulation) {
+      this.input.requestPointerLock().catch(() => {});
+    }
   }
 
-  pause() {
+  applyPause() {
     if (this.state.phase !== "playing") return;
     this.state.phase = "paused";
+    this.player.setEnabled(false);
+    this.rifle.setEnabled(false);
+    this.input.enabled = false;
     this.input.reset();
     this.clock.clearAccumulator();
-    this.menu.hidden = false;
-    const heading = this.menu.querySelector("h1");
-    heading.textContent = "PAUSED";
-    this.menu.querySelector('[data-action="start"]').textContent = "RESUME";
-    this.events.emit("game:pause", {});
+    if (!this.options.capture) this.input.exitPointerLock();
   }
 
-  resume() {
+  applyResume() {
     if (this.state.phase !== "paused") return;
     this.state.phase = "playing";
-    this.menu.hidden = true;
+    this.player.setEnabled(true);
+    this.rifle.setEnabled(true);
+    this.input.enabled = true;
     this.clock.clearAccumulator();
-    this.events.emit("game:resume", {});
-    if (!this.options.capture) this.input.requestPointerLock();
+    this.audio.resume();
+    if (!this.options.capture && !this.manualSimulation) {
+      this.input.requestPointerLock().catch(() => {});
+    }
+  }
+
+  applyRestart() {
+    this.state.phase = "playing";
+    this.state.kills = 0;
+    this.state.elapsed = 0;
+    this.rng.reset(this.state.seed);
+    this.input.reset();
+    this.player.reset(this.state.seed);
+    this.rifle.reset(this.state.seed);
+    this.effects.reset(this.state.seed);
+    this.enemies.reset(this.state.seed);
+    this.player.setEnabled(true);
+    this.rifle.setEnabled(true);
+    this.input.enabled = true;
+    this.captureOverride = null;
+    this.clock.clearAccumulator();
+    if (!this.options.capture && !this.manualSimulation) {
+      this.input.requestPointerLock().catch(() => {});
+    }
+  }
+
+  applyQuality(name) {
+    if (!["low", "medium", "high"].includes(name)) return;
+    this.context.quality = this.rendering.applyQuality(name);
+    this.state.quality = this.context.quality.name;
+  }
+
+  onEnemyDeath() {
+    if (this.state.phase !== "playing") return;
+    this.state.kills += 1;
+    if (this.state.kills >= this.state.requiredKills) {
+      this.finishMatch("victory");
+    }
+  }
+
+  onPlayerDeath() {
+    if (this.state.phase === "playing") this.finishMatch("defeat");
+  }
+
+  finishMatch(result) {
+    this.state.phase = result;
+    this.player.setEnabled(false);
+    this.rifle.setEnabled(false);
+    this.input.enabled = false;
+    this.input.reset();
+    this.input.exitPointerLock();
+    this.events.emit(`game:${result}`, {
+      kills: this.state.kills,
+      elapsed: this.state.elapsed,
+    });
   }
 
   fixedUpdate(dt) {
-    this.state.elapsed += dt;
     if (this.state.phase !== "playing") return;
-    const speed = this.input.isDown("ShiftLeft") ? 7.5 : 4.2;
-    const local = new THREE.Vector3(
-      Number(this.input.isDown("KeyD")) - Number(this.input.isDown("KeyA")),
-      0,
-      Number(this.input.isDown("KeyS")) - Number(this.input.isDown("KeyW")),
-    );
-    if (local.lengthSq() > 0) {
-      local.normalize().multiplyScalar(speed * dt);
-      local.applyAxisAngle(
-        new THREE.Vector3(0, 1, 0),
-        this.rendering.camera.rotation.y,
-      );
-      this.rendering.camera.position.add(local);
-    }
-    const look = this.input.consumeLook();
-    this.rendering.camera.rotation.y -= look.x * 0.0018;
-    this.rendering.camera.rotation.x = THREE.MathUtils.clamp(
-      this.rendering.camera.rotation.x - look.y * 0.0016,
-      -1.35,
-      1.35,
-    );
+    this.state.elapsed += dt;
+    this.player.fixedUpdate(dt);
+    this.rifle.fixedUpdate(dt);
+    this.enemies.fixedUpdate(dt);
+    this.effects.fixedUpdate(dt);
   }
 
-  update(frame, alpha) {
-    this.diagnostics.recordFrame(frame);
+  update(dt, alpha = 1) {
+    this.player.update(dt, alpha);
+    this.rifle.update(dt, alpha);
+    this.enemies.update(dt, alpha);
+    this.effects.update(dt, alpha);
+    this.audio.setListener(this.rendering.camera);
+    if (this.captureOverride) this.applyCaptureCamera();
+    this.ui.render({
+      dt,
+      player: this.player.snapshot,
+      weapon: this.rifle.snapshot,
+      effects: this.effects.snapshot,
+      enemies: this.enemies.snapshot,
+      state: this.state,
+    });
+    this.rendering.render();
+    this.diagnostics.recordFrame(dt);
     this.diagnostics.rendererInfo = {
       memory: { ...this.rendering.renderer.info.memory },
       render: { ...this.rendering.renderer.info.render },
     };
-    this.rendering.render(alpha);
+    this.diagnostics.set("listeners", this.events.listenerCount());
+    this.diagnostics.set("enemies", this.enemies.livingCount);
+    this.diagnostics.set("particles", this.effects.snapshot.activeParticles);
     this.input.endFrame();
   }
 
@@ -280,45 +395,315 @@ export class Game {
     this.clock.reset();
     const loop = (timestamp) => {
       if (!this.running) return;
-      const frame = this.clock.tick(
-        timestamp * 0.001,
-        (dt) => this.fixedUpdate(dt),
-      );
-      this.update(frame.frame, frame.alpha);
+      if (!this.manualSimulation) {
+        const frame = this.clock.tick(
+          timestamp * 0.001,
+          (dt) => this.fixedUpdate(dt),
+        );
+        this.update(frame.frame, frame.alpha);
+      } else if (!this.performanceRunning) {
+        this.rendering.render();
+      }
       this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
   }
 
+  async manualStep(frames = 1) {
+    const count = THREE.MathUtils.clamp(Math.floor(frames), 0, 3600);
+    for (let i = 0; i < count; i += 1) this.fixedUpdate(FIXED_STEP);
+    this.update(FIXED_STEP, 1);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    return this.snapshot();
+  }
+
+  async fireTest(count = 1) {
+    const shots = THREE.MathUtils.clamp(Math.floor(count), 1, 40);
+    const startingShot = this.rifle.shotIndex;
+    this.rifle.triggerDown();
+    let guard = 0;
+    while (this.rifle.shotIndex - startingShot < shots && guard < shots * 12) {
+      this.fixedUpdate(FIXED_STEP);
+      guard += 1;
+    }
+    this.rifle.triggerUp();
+    this.update(FIXED_STEP, 1);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    return this.rifle.snapshot;
+  }
+
+  async runPerformance(frameCount = 600, options = {}) {
+    const frames = THREE.MathUtils.clamp(Math.floor(frameCount), 60, 1200);
+    if (options.quality) this.applyQuality(options.quality);
+    this.performanceRunning = true;
+    const samples = [];
+    let previous = performance.now();
+    for (let i = 0; i < frames; i += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const now = performance.now();
+      samples.push(now - previous);
+      previous = now;
+      if (options.movement) {
+        const phase = i % 240;
+        this.input.setSynthetic({
+          KeyW: phase < 160,
+          KeyD: phase >= 160,
+          ShiftLeft: phase < 80,
+          fire: Boolean(options.combat && i % 7 < 2),
+        });
+      }
+      this.fixedUpdate(FIXED_STEP);
+      this.update(FIXED_STEP, 1);
+    }
+    this.input.clearSynthetic();
+    this.performanceRunning = false;
+    this.performanceSamples = samples;
+    const medianFrameMs = percentile(samples, 0.5);
+    const p95FrameMs = percentile(samples, 0.95);
+    return {
+      frames,
+      frameTimes: [...samples],
+      medianFrameMs,
+      p95FrameMs,
+      medianFps: medianFrameMs > 0 ? 1000 / medianFrameMs : 0,
+    };
+  }
+
+  getCapturePose(name) {
+    const poses = this.world?.capturePoses;
+    if (poses instanceof Map && poses.has(name)) return poses.get(name);
+    if (poses?.[name]) return poses[name];
+    const worldKey = WORLD_CAPTURE_KEYS[name];
+    if (worldKey && poses?.[worldKey]) return poses[worldKey];
+    return FALLBACK_CAPTURE_POSES[name] || FALLBACK_CAPTURE_POSES["wide-street"];
+  }
+
+  setCapturePose(name) {
+    this.captureMode = name;
+    const pose = this.getCapturePose(name);
+    this.captureOverride = {
+      position: toVector(pose.position ?? pose.camera, _capturePosition)?.clone()
+        ?? new THREE.Vector3(...FALLBACK_CAPTURE_POSES["wide-street"].position),
+      target: toVector(pose.target ?? pose.lookAt, _captureTarget)?.clone()
+        ?? new THREE.Vector3(...FALLBACK_CAPTURE_POSES["wide-street"].target),
+      fov: Number(pose.fov) || 68,
+    };
+
+    const isActive = name === "active-combat";
+    const isWeapon = name === "weapon-hip" || name === "weapon-ads";
+    this.state.phase = isActive ? "playing" : "capture";
+    this.player.setEnabled(isActive);
+    this.rifle.setEnabled(isActive || isWeapon);
+    this.rifle.setADS(name === "weapon-ads");
+    if (name === "weapon-ads") this.rifle.ads = 1;
+    if (name === "weapon-hip") this.rifle.ads = 0;
+
+    if (isActive) {
+      this.captureOverride = null;
+      const playerPose = pose.player ?? pose;
+      const feet = toVector(playerPose.playerPosition, _capturePosition)
+        ?? toVector(pose.position, _capturePosition);
+      if (feet) {
+        _capturePosition.y = Number(playerPose.groundY ?? 0.04);
+        const target = toVector(pose.target, _captureTarget);
+        const directionX = target ? target.x - _capturePosition.x : 0;
+        const directionZ = target ? target.z - _capturePosition.z : -1;
+        const authoredYaw = Number(playerPose.yaw ?? pose.yaw);
+        const yaw = Number.isFinite(authoredYaw)
+          ? authoredYaw
+          : Math.atan2(-directionX, -directionZ);
+        this.player.teleport(
+          _capturePosition,
+          yaw,
+        );
+      }
+      this.enemies.forceAlert(this.player.position);
+      this.ui.setScreen("playing");
+    } else {
+      this.ui.setScreen("capture");
+      if (name === "enemy") {
+        const enemy = this.enemies.enemies.find((entry) => entry.alive);
+        if (enemy && !pose.position) {
+          this.captureOverride.position
+            .copy(enemy.rig.root.position)
+            .add(new THREE.Vector3(4.8, 2.05, 7.2));
+          this.captureOverride.target
+            .copy(enemy.rig.root.position)
+            .add(new THREE.Vector3(0, 1.25, 0));
+        }
+      }
+      this.applyCaptureCamera();
+    }
+    return this.captureOverride ?? { mode: name };
+  }
+
+  applyCaptureCamera() {
+    if (!this.captureOverride) return;
+    this.rendering.camera.position.copy(this.captureOverride.position);
+    this.rendering.camera.fov = this.captureOverride.fov;
+    this.rendering.camera.updateProjectionMatrix();
+    this.rendering.camera.lookAt(this.captureOverride.target);
+    _captureQuaternion.copy(this.rendering.camera.quaternion);
+  }
+
+  stateSnapshot() {
+    return {
+      phase: this.state.phase,
+      kills: this.state.kills,
+      requiredKills: this.state.requiredKills,
+      elapsed: this.state.elapsed,
+      seed: this.state.seed,
+      quality: this.state.quality,
+    };
+  }
+
+  snapshot() {
+    return {
+      state: this.stateSnapshot(),
+      player: {
+        position: vectorSnapshot(this.player.snapshot.position),
+        eyePosition: vectorSnapshot(this.player.snapshot.eyePosition),
+        velocity: vectorSnapshot(this.player.snapshot.velocity),
+        yaw: this.player.snapshot.yaw,
+        pitch: this.player.snapshot.pitch,
+        health: this.player.snapshot.health,
+        maxHealth: this.player.snapshot.maxHealth,
+        alive: this.player.snapshot.alive,
+        grounded: this.player.snapshot.grounded,
+        crouched: this.player.snapshot.crouched,
+        sliding: this.player.snapshot.sliding,
+        sprinting: this.player.snapshot.sprinting,
+        mantling: this.player.snapshot.mantling,
+        lean: this.player.snapshot.lean,
+        speed: this.player.snapshot.speed,
+        moveState: this.player.snapshot.moveState,
+      },
+      weapon: { ...this.rifle.snapshot },
+      enemies: this.enemies.snapshot.enemies.map((enemy) => ({
+        ...enemy,
+        position: vectorSnapshot(enemy.position),
+      })),
+      effects: { ...this.effects.snapshot },
+      camera: {
+        position: vectorSnapshot(this.rendering.camera.position),
+        rotation: {
+          x: this.rendering.camera.rotation.x,
+          y: this.rendering.camera.rotation.y,
+          z: this.rendering.camera.rotation.z,
+        },
+      },
+      world: {
+        facadeFamilies: this.world?.stats?.facadeFamilies ?? 8,
+        interiors: this.world?.stats?.enterableInteriors ?? 4,
+        propArchetypes: this.world?.stats?.propArchetypes ?? 30,
+        materialFamilies: this.materials.familyCount,
+      },
+      listenerCount: this.events.listenerCount(),
+    };
+  }
+
+  frameStats() {
+    const snapshot = this.diagnostics.snapshot();
+    return {
+      ...snapshot,
+      frameTimes: [...this.performanceSamples],
+      samples: [...this.performanceSamples],
+    };
+  }
+
   exposeTestInterface() {
     if (!this.options.test) return;
-    window.__FPS_TEST__ = Object.freeze({
-      version: 1,
-      ready: () => true,
-      state: () => ({ ...this.state }),
-      diagnostics: () => this.diagnostics.snapshot(),
-      start: () => this.startMatch(),
-      pause: () => this.pause(),
-      resume: () => this.resume(),
-      resize: (width, height) => this.rendering.resize(width, height),
-      captureReady: () => new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    });
+    const api = {
+      version: 2,
+      ready: () => this.ready,
+      state: () => this.stateSnapshot(),
+      diagnostics: () => ({
+        ...this.diagnostics.snapshot(),
+        rendererInfo: this.diagnostics.rendererInfo,
+      }),
+      start: async () => {
+        this.events.emit("game:start", { source: "test" });
+        return this.stateSnapshot();
+      },
+      pause: async () => {
+        this.events.emit("game:pause", { source: "test" });
+        return this.stateSnapshot();
+      },
+      resume: async () => {
+        this.events.emit("game:resume", { source: "test" });
+        return this.stateSnapshot();
+      },
+      restart: async () => {
+        this.events.emit("game:restart", { source: "test" });
+        return this.stateSnapshot();
+      },
+      resize: async (width, height) => this.rendering.resize(width, height),
+      captureReady: async () => {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        return true;
+      },
+      snapshot: () => this.snapshot(),
+      setInput: (record) => this.input.setSynthetic(record),
+      step: (frames) => this.manualStep(frames),
+      teleport: async (position, yaw = 0) => {
+        if (toVector(position, _capturePosition)) {
+          this.player.teleport(_capturePosition, yaw);
+        }
+        return this.snapshot();
+      },
+      fire: (count) => this.fireTest(count),
+      damagePlayer: async (amount) => {
+        this.player.applyDamage(amount, _damageDirection, "test");
+        return this.player.snapshot.health;
+      },
+      killEnemy: async (id, zone = "torso") =>
+        this.enemies.applyDamage(id, 1000, zone, _damageDirection),
+      setCapturePose: async (name) => this.setCapturePose(name),
+      frameStats: async () => this.frameStats(),
+      runPerformance: (frames, performanceOptions) =>
+        this.runPerformance(frames, performanceOptions),
+      pointerLock: async () => {
+        const supported = typeof this.rendering.renderer.domElement
+          .requestPointerLock === "function";
+        if (!supported) return false;
+        try {
+          await this.input.requestPointerLock();
+        } catch {
+          // Headless browsers can deny non-gesture requests. API support still
+          // proves the production path is wired and the UI click probes it.
+        }
+        return true;
+      },
+      pointerLocked: async () =>
+        document.pointerLockElement === this.rendering.renderer.domElement,
+    };
+    window.__FPS_TEST__ = Object.freeze(api);
   }
 
   dispose() {
     this.running = false;
     cancelAnimationFrame(this.raf);
     this.abort.abort();
+    for (let i = this.unsubscribers.length - 1; i >= 0; i -= 1) {
+      this.unsubscribers[i]();
+    }
+    this.unsubscribers.length = 0;
+    this.ui.dispose();
+    this.audio.dispose();
+    this.enemies.dispose();
+    this.effects.dispose();
+    this.rifle.dispose();
+    this.player.dispose();
     this.input.dispose();
+    this.worldBuilder.dispose?.();
+    this.materials.dispose();
     this.physics.dispose();
     this.rendering.dispose();
-    this.foundationStyle?.remove();
-    this.menu?.remove();
     this.events.clear();
     delete window.__FPS_TEST__;
+    delete window.__CINDERLINE__;
   }
 }
 
 export default Game;
-

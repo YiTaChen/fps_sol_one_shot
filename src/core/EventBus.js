@@ -54,6 +54,13 @@ export class EventBus {
     }
   }
 
+  listenerCount(type = null) {
+    if (type) return this.listeners.get(type)?.size ?? 0;
+    let total = 0;
+    for (const set of this.listeners.values()) total += set.size;
+    return total;
+  }
+
   clear() {
     this.listeners.clear();
     this.pendingRemovals.length = 0;
@@ -61,4 +68,3 @@ export class EventBus {
 }
 
 export default EventBus;
-
