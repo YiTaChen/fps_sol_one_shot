@@ -1,0 +1,25 @@
+{
+  "name": "fps-sol-one-shot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cinderline: One Shot — an original procedural browser tactical FPS",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "test": "node scripts/test.mjs",
+    "capture": "node scripts/capture.mjs",
+    "profile": "node scripts/profile.mjs"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.55.0",
+    "vite": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+

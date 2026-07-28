@@ -1,0 +1,250 @@
+import * as THREE from "three";
+
+const _candidatePosition = new THREE.Vector3();
+const _axisDelta = new THREE.Vector3();
+const _rayPoint = new THREE.Vector3();
+const _rayNormal = new THREE.Vector3();
+const _invDirection = new THREE.Vector3();
+const _capsuleBox = new THREE.Box3();
+const _expanded = new THREE.Box3();
+const _pointA = new THREE.Vector3();
+const _pointB = new THREE.Vector3();
+
+function rayBox(origin, direction, box, maxDistance) {
+  _invDirection.set(
+    direction.x === 0 ? Number.POSITIVE_INFINITY : 1 / direction.x,
+    direction.y === 0 ? Number.POSITIVE_INFINITY : 1 / direction.y,
+    direction.z === 0 ? Number.POSITIVE_INFINITY : 1 / direction.z,
+  );
+  let tMin = -Infinity;
+  let tMax = Infinity;
+  let hitAxis = "x";
+  let hitSign = 0;
+  for (const axis of ["x", "y", "z"]) {
+    let t1 = (box.min[axis] - origin[axis]) * _invDirection[axis];
+    let t2 = (box.max[axis] - origin[axis]) * _invDirection[axis];
+    let sign = -Math.sign(direction[axis]) || -1;
+    if (t1 > t2) {
+      [t1, t2] = [t2, t1];
+      sign *= -1;
+    }
+    if (t1 > tMin) {
+      tMin = t1;
+      hitAxis = axis;
+      hitSign = sign;
+    }
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return null;
+  }
+  const distance = tMin >= 0 ? tMin : tMax;
+  if (distance < 0 || distance > maxDistance) return null;
+  return { distance, axis: hitAxis, sign: hitSign };
+}
+
+function buildCapsuleBox(position, capsule, target = _capsuleBox) {
+  const radius = capsule.radius ?? 0.34;
+  const height = capsule.height ?? capsule.standingHeight ?? 1.72;
+  return target.set(
+    _pointA.set(position.x - radius, position.y, position.z - radius),
+    _pointB.set(position.x + radius, position.y + height, position.z + radius),
+  );
+}
+
+export class PhysicsWorld {
+  constructor() {
+    this.staticColliders = [];
+    this.coverPoints = [];
+    this.dynamicTargets = new Map();
+    this.bounds = new THREE.Box3(
+      new THREE.Vector3(-50, -12, -50),
+      new THREE.Vector3(50, 28, 50),
+    );
+  }
+
+  addStatic(collider) {
+    const min = collider.min?.isVector3
+      ? collider.min.clone()
+      : new THREE.Vector3().fromArray(collider.min || [0, 0, 0]);
+    const max = collider.max?.isVector3
+      ? collider.max.clone()
+      : new THREE.Vector3().fromArray(collider.max || [0, 0, 0]);
+    const record = {
+      ...collider,
+      min,
+      max,
+      box: new THREE.Box3(min, max),
+      mask: collider.mask ?? 0xffffffff,
+      material: collider.material || "concrete",
+      penetrable: Boolean(collider.penetrable),
+    };
+    this.staticColliders.push(record);
+    return record;
+  }
+
+  addBox(center, size, options = {}) {
+    const half = _pointA.copy(size).multiplyScalar(0.5);
+    return this.addStatic({
+      ...options,
+      min: _pointB.copy(center).sub(half).clone(),
+      max: _pointB.copy(center).add(half).clone(),
+    });
+  }
+
+  addCoverPoint(point) {
+    const record = point.position ? point : { position: point.clone() };
+    this.coverPoints.push(record);
+    return record;
+  }
+
+  registerDynamic(id, target) {
+    this.dynamicTargets.set(id, target);
+    return () => this.dynamicTargets.delete(id);
+  }
+
+  moveCapsule(position, delta, capsule = {}) {
+    const resultPosition = _candidatePosition.copy(position);
+    const collisions = [];
+    let grounded = false;
+    const axes = ["x", "z", "y"];
+    for (const axis of axes) {
+      _axisDelta.set(0, 0, 0);
+      _axisDelta[axis] = delta[axis];
+      resultPosition.add(_axisDelta);
+      const capsuleBox = buildCapsuleBox(resultPosition, capsule);
+      for (const collider of this.staticColliders) {
+        if (!capsuleBox.intersectsBox(collider.box)) continue;
+        const radius = capsule.radius ?? 0.34;
+        const height = capsule.height ?? capsule.standingHeight ?? 1.72;
+        if (axis === "x") {
+          resultPosition.x = delta.x > 0
+            ? collider.min.x - radius
+            : collider.max.x + radius;
+        } else if (axis === "z") {
+          resultPosition.z = delta.z > 0
+            ? collider.min.z - radius
+            : collider.max.z + radius;
+        } else if (delta.y <= 0) {
+          resultPosition.y = collider.max.y;
+          grounded = true;
+        } else {
+          resultPosition.y = collider.min.y - height;
+        }
+        buildCapsuleBox(resultPosition, capsule);
+        collisions.push({
+          collider,
+          axis,
+          normal: new THREE.Vector3(
+            axis === "x" ? -Math.sign(delta.x) : 0,
+            axis === "y" ? -Math.sign(delta.y) : 0,
+            axis === "z" ? -Math.sign(delta.z) : 0,
+          ),
+        });
+      }
+    }
+    resultPosition.x = THREE.MathUtils.clamp(
+      resultPosition.x,
+      this.bounds.min.x + 0.4,
+      this.bounds.max.x - 0.4,
+    );
+    resultPosition.z = THREE.MathUtils.clamp(
+      resultPosition.z,
+      this.bounds.min.z + 0.4,
+      this.bounds.max.z - 0.4,
+    );
+    position.copy(resultPosition);
+    return {
+      position,
+      grounded,
+      collided: collisions.length > 0,
+      collisions,
+    };
+  }
+
+  capsuleClear(position, capsule = {}) {
+    const capsuleBox = buildCapsuleBox(position, capsule);
+    return !this.staticColliders.some((collider) =>
+      capsuleBox.intersectsBox(collider.box));
+  }
+
+  raycast(origin, direction, maxDistance = 100, mask = 0xffffffff) {
+    let closest = null;
+    for (const collider of this.staticColliders) {
+      if ((collider.mask & mask) === 0) continue;
+      const hit = rayBox(origin, direction, collider.box, maxDistance);
+      if (!hit || (closest && hit.distance >= closest.distance)) continue;
+      _rayPoint.copy(direction).multiplyScalar(hit.distance).add(origin);
+      _rayNormal.set(0, 0, 0);
+      _rayNormal[hit.axis] = hit.sign;
+      closest = {
+        distance: hit.distance,
+        point: _rayPoint.clone(),
+        normal: _rayNormal.clone(),
+        collider,
+        object: collider.object || null,
+        material: collider.material,
+        penetrable: collider.penetrable,
+      };
+    }
+    for (const [id, target] of this.dynamicTargets) {
+      if (target.active === false) continue;
+      const box = typeof target.getBounds === "function"
+        ? target.getBounds(_expanded)
+        : target.box;
+      if (!box) continue;
+      const hit = rayBox(origin, direction, box, maxDistance);
+      if (!hit || (closest && hit.distance >= closest.distance)) continue;
+      _rayPoint.copy(direction).multiplyScalar(hit.distance).add(origin);
+      _rayNormal.set(0, 0, 0);
+      _rayNormal[hit.axis] = hit.sign;
+      closest = {
+        distance: hit.distance,
+        point: _rayPoint.clone(),
+        normal: _rayNormal.clone(),
+        target,
+        id,
+        object: target.object || null,
+        material: target.material || "flesh",
+        hitZone: typeof target.hitZoneAt === "function"
+          ? target.hitZoneAt(_rayPoint)
+          : "body",
+      };
+    }
+    return closest;
+  }
+
+  lineOfSight(a, b) {
+    const distance = _pointA.copy(b).sub(a).length();
+    if (distance < 0.001) return true;
+    const direction = _pointA.normalize();
+    const hit = this.raycast(a, direction, Math.max(0, distance - 0.08));
+    return !hit;
+  }
+
+  queryCover(origin, radius = 18) {
+    const radiusSq = radius * radius;
+    return this.coverPoints
+      .filter((point) => point.position.distanceToSquared(origin) <= radiusSq)
+      .sort((a, b) =>
+        a.position.distanceToSquared(origin) - b.position.distanceToSquared(origin));
+  }
+
+  materialAt(point) {
+    const origin = _pointA.copy(point);
+    origin.y += 0.25;
+    const hit = this.raycast(origin, _pointB.set(0, -1, 0), 1);
+    return hit?.material || "asphalt";
+  }
+
+  clear() {
+    this.staticColliders.length = 0;
+    this.coverPoints.length = 0;
+    this.dynamicTargets.clear();
+  }
+
+  dispose() {
+    this.clear();
+  }
+}
+
+export default PhysicsWorld;
+
