@@ -6,3 +6,4 @@ playwright-report/
 *.log
 outputs/
 work/
+artifacts/captures/manifest.partial.json

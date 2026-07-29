@@ -1,0 +1,85 @@
+{
+  "title": "Cinderline: One Shot",
+  "seed": 203286302,
+  "quality": "high",
+  "viewport": {
+    "width": 1440,
+    "height": 810
+  },
+  "captures": [
+    {
+      "id": "wide-street",
+      "file": "01-wide-street.png",
+      "description": "Wide market street composition",
+      "bytes": 1152284,
+      "sha256": "204ac37f8d44ca079eed41379ce35191a28a274c5fc02d9b6efe805617224973"
+    },
+    {
+      "id": "facade-close",
+      "file": "02-facade-close.png",
+      "description": "Close procedural façade",
+      "bytes": 1349074,
+      "sha256": "913935c590720ba5449b8b3f6928e623e12f25aa607c51abe751f0ce1b961da8"
+    },
+    {
+      "id": "interior",
+      "file": "03-interior.png",
+      "description": "Enterable dressed interior",
+      "bytes": 1456972,
+      "sha256": "776dafa1c46f5b7fb327b0e21ae4d52511d0639954c0d925ea6308e449faa282"
+    },
+    {
+      "id": "weapon-hip",
+      "file": "04-weapon-hip.png",
+      "description": "Hip-fire weapon close-up",
+      "bytes": 1464684,
+      "sha256": "24d1d42659b985a361dc57cd574da75ebf1fba60944425b6368b85d7c3bfef9d"
+    },
+    {
+      "id": "weapon-ads",
+      "file": "05-weapon-ads.png",
+      "description": "ADS weapon alignment",
+      "bytes": 1440592,
+      "sha256": "ec4f073f206aad24abcc2d935b689aa6e42023ef802836d67d89279d8d7effe6"
+    },
+    {
+      "id": "enemy",
+      "file": "06-enemy.png",
+      "description": "Enemy soldier at combat distance",
+      "bytes": 1419238,
+      "sha256": "8a046fc8301065181bd444b2472227a3e5aa2dde2fb8b84040fc1a7bf24a35d9"
+    },
+    {
+      "id": "active-combat",
+      "file": "07-active-combat.png",
+      "description": "Active combat, effects, enemy, world, and HUD",
+      "bytes": 1289340,
+      "sha256": "52736ddb6299df506361e656ef0cfe230f63bbe3fb1da5ec2f852b807a729050",
+      "state": {
+        "targetId": 0,
+        "targetHealthBefore": 100,
+        "targetHealthAfter": 24.39999999999999,
+        "playerHealth": 60.48095961357467,
+        "magazine": 29,
+        "effects": {
+          "activeParticles": 96,
+          "activeTracers": 2,
+          "activeDecals": 5,
+          "activeShells": 1,
+          "particleBudget": 96,
+          "hitMarker": 0.912280701754386,
+          "hitHeadshot": true,
+          "hitKill": false
+        }
+      }
+    }
+  ],
+  "browserDiagnostics": {
+    "consoleErrors": [],
+    "pageErrors": [],
+    "requestFailures": [],
+    "httpErrors": []
+  },
+  "mode": "full",
+  "completedAt": "2026-07-29T01:53:26.289Z"
+}
