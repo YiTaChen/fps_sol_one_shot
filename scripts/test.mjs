@@ -82,7 +82,81 @@ async function main() {
     });
     const movementDistance = distance3(positionBeforeMove, positionAfterMove);
     assert(movementDistance > 0.6, `Synthetic movement advanced only ${movementDistance.toFixed(3)}m`);
+    assert(
+      Number.isFinite(positionAfterMove?.y) && positionAfterMove.y > -0.5,
+      `Player left the walkable world during movement (y=${positionAfterMove?.y})`,
+    );
     pass('deterministic movement', `${movementDistance.toFixed(2)} m`);
+
+    const locomotion = await page.evaluate(async () => {
+      const api = window.__FPS_TEST__;
+
+      api.setInput({ Space: true });
+      await api.step(1);
+      const jump = api.snapshot().player;
+      api.setInput({});
+      await api.step(45);
+
+      api.setInput({ ControlLeft: true });
+      await api.step(4);
+      const crouch = api.snapshot().player;
+      api.setInput({});
+      await api.step(10);
+
+      api.setInput({ KeyQ: true });
+      await api.step(12);
+      const leanLeft = api.snapshot().player.lean;
+      api.setInput({ KeyE: true });
+      await api.step(12);
+      const leanRight = api.snapshot().player.lean;
+      api.setInput({});
+      await api.step(4);
+
+      api.setInput({ KeyW: true, ShiftLeft: true });
+      await api.step(42);
+      api.setInput({ KeyW: true, ShiftLeft: true, ControlLeft: true });
+      await api.step(2);
+      const slide = api.snapshot().player;
+      api.setInput({});
+      await api.step(4);
+
+      return { jump, crouch, leanLeft, leanRight, slide };
+    });
+    assert(
+      locomotion.jump.grounded === false && locomotion.jump.velocity.y > 0,
+      'Jump did not produce an airborne upward state',
+    );
+    assert(locomotion.crouch.crouched === true, 'Crouch input did not lower the stance');
+    assert(locomotion.leanLeft < -0.03, `Left lean was only ${locomotion.leanLeft}`);
+    assert(locomotion.leanRight > 0.03, `Right lean was only ${locomotion.leanRight}`);
+    assert(
+      locomotion.slide.sliding === true || locomotion.slide.moveState === 'slide',
+      `Sprint-crouch did not enter slide (state=${locomotion.slide.moveState})`,
+    );
+    pass('advanced locomotion', 'jump, crouch, slide, and protected lean');
+
+    const slopeTraversal = await page.evaluate(async () => {
+      const api = window.__FPS_TEST__;
+      await api.restart();
+      await api.teleport([-28, 0.02, -30.65], 0);
+      api.setInput({ KeyW: true });
+      await api.step(60);
+      api.setInput({});
+      await api.step(2);
+      return api.snapshot().player;
+    });
+    assert(
+      slopeTraversal.position.z < -34.25 && slopeTraversal.position.y > 0.3,
+      `Continuous loading ramp was not traversed (${JSON.stringify(slopeTraversal.position)})`,
+    );
+    assert(
+      slopeTraversal.grounded === true,
+      'Player lost grounded contact while walking onto the ramp landing',
+    );
+    pass(
+      'collision and continuous slope',
+      `landed at y=${slopeTraversal.position.y.toFixed(2)} m`,
+    );
 
     await page.evaluate(async () => {
       const api = window.__FPS_TEST__;
@@ -157,6 +231,39 @@ async function main() {
     );
     pass('weapon firing', `${ammoTest.before} → ${ammoTest.after}`);
 
+    const weaponState = await page.evaluate(async () => {
+      const api = window.__FPS_TEST__;
+      api.setInput({ ads: true });
+      await api.step(24);
+      const ads = api.snapshot().weapon;
+      api.setInput({});
+      await api.step(4);
+
+      const beforeReload = api.snapshot().weapon;
+      api.setInput({ KeyR: true });
+      await api.step(1);
+      const duringReload = api.snapshot().weapon;
+      api.setInput({});
+      await api.step(115);
+      const afterReload = api.snapshot().weapon;
+      return { ads, beforeReload, duringReload, afterReload };
+    });
+    assert(
+      weaponState.ads.isADS === true && weaponState.ads.ads > 0.85,
+      `ADS did not converge (${weaponState.ads.ads})`,
+    );
+    assert(weaponState.duringReload.reloading === true, 'Reload state did not begin');
+    assert(
+      weaponState.afterReload.magazine > weaponState.beforeReload.magazine
+      && weaponState.afterReload.reserve < weaponState.beforeReload.reserve
+      && weaponState.afterReload.reloading === false,
+      'Reload did not transfer reserve ammunition and complete',
+    );
+    pass(
+      'ADS and reload state machine',
+      `${weaponState.beforeReload.magazine} → ${weaponState.afterReload.magazine} rounds`,
+    );
+
     const damageTest = await page.evaluate(async () => {
       const api = window.__FPS_TEST__;
       const before = api.snapshot().player?.health;
@@ -171,6 +278,52 @@ async function main() {
     );
     pass('player damage', `${damageTest.before} → ${damageTest.after}`);
 
+    const ballisticCombat = await page.evaluate(async () => {
+      const api = window.__FPS_TEST__;
+      await api.restart();
+      const poseResult = await api.setCapturePose('active-combat');
+      const before = api.snapshot();
+      const target = before.enemies.find(
+        (enemy) => enemy.id === poseResult?.targetId,
+      ) ?? before.enemies.find((enemy) => enemy.alive);
+      const playerHealthBefore = before.player.health;
+      await api.fire(2);
+      await api.step(7);
+      const after = api.snapshot();
+      const targetAfter = after.enemies.find((enemy) => enemy.id === target?.id);
+      return {
+        targetId: target?.id,
+        targetHealthBefore: target?.health,
+        targetHealthAfter: targetAfter?.health,
+        targetAliveAfter: targetAfter?.alive,
+        playerHealthBefore,
+        playerHealthAfter: after.player.health,
+        enemyState: targetAfter?.state,
+        effects: after.effects,
+      };
+    });
+    assert(
+      Number(ballisticCombat.targetHealthAfter) < Number(ballisticCombat.targetHealthBefore),
+      'Real projectile fire did not damage the authored combat target',
+    );
+    assert(
+      Number(ballisticCombat.playerHealthAfter) < Number(ballisticCombat.playerHealthBefore),
+      'Enemy controlled fire did not damage the player during the combat probe',
+    );
+    assert(
+      ballisticCombat.effects.activeDecals > 0
+      && ballisticCombat.effects.activeParticles > 0,
+      'Ballistic combat did not create impact decals and particles',
+    );
+    pass(
+      'real ballistic combat',
+      `target ${ballisticCombat.targetHealthBefore} → ${ballisticCombat.targetHealthAfter}; player ${ballisticCombat.playerHealthBefore} → ${ballisticCombat.playerHealthAfter}`,
+    );
+
+    await page.evaluate(async () => {
+      await window.__FPS_TEST__.restart();
+      await window.__FPS_TEST__.step(3);
+    });
     const combat = await page.evaluate(async () => {
       const api = window.__FPS_TEST__;
       const snapshot = api.snapshot();
@@ -195,7 +348,7 @@ async function main() {
       String(combat.state.phase).toLowerCase() === 'victory',
       `Killing the objective did not trigger victory (phase=${combat.state.phase})`,
     );
-    pass('complete victory loop', `${combat.killed} hostiles neutralized`);
+    pass('objective victory loop', `${combat.killed} hostiles neutralized`);
 
     await page.evaluate(async () => {
       const api = window.__FPS_TEST__;
@@ -229,14 +382,33 @@ async function main() {
       const requested = await api.pointerLock();
       await api.step(1);
       const locked = await api.pointerLocked();
-      document.exitPointerLock?.();
-      return { requested, locked };
+      await api.restart();
+      api.setInput({ KeyW: true });
+      const stateAfterExit = await api.simulatePointerLockLoss();
+      const positionBefore = api.snapshot().player.position;
+      await api.step(12);
+      const positionAfter = api.snapshot().player.position;
+      return {
+        requested,
+        locked,
+        phaseAfterExit: stateAfterExit.phase,
+        movementAfterExit: Math.hypot(
+          positionAfter.x - positionBefore.x,
+          positionAfter.y - positionBefore.y,
+          positionAfter.z - positionBefore.z,
+        ),
+      };
     });
     assert(
       pointerLock.locked === true || pointerLock.requested === true,
       'Pointer-lock probe did not report a successful request',
     );
-    pass('pointer-lock probe');
+    assert(
+      String(pointerLock.phaseAfterExit).toLowerCase() === 'paused'
+      && pointerLock.movementAfterExit < 0.01,
+      `Pointer-lock loss did not pause/reset input (${JSON.stringify(pointerLock)})`,
+    );
+    pass('pointer-lock loss and input reset');
 
     const internalDiagnostics = await page.evaluate(
       () => window.__FPS_TEST__.diagnostics(),
@@ -246,7 +418,7 @@ async function main() {
       !Array.isArray(internalErrors) || internalErrors.length === 0,
       `Internal diagnostics reported errors: ${JSON.stringify(internalErrors)}`,
     );
-    assertNoPageErrors(diagnostics, [/favicon\.ico/i]);
+    assertNoPageErrors(diagnostics);
     pass('console and page errors', 'none');
 
     const report = {
@@ -273,4 +445,3 @@ main().catch((error) => {
   process.stderr.write(`\nTest failure: ${error.stack ?? error.message}\n`);
   process.exitCode = 1;
 });
-

@@ -1,6 +1,6 @@
 {
   "status": "passed",
-  "durationMs": 229455.713776,
+  "durationMs": 350850.497928,
   "results": [
     {
       "name": "game boot",
@@ -28,6 +28,16 @@
       "detail": "8.39 m"
     },
     {
+      "name": "advanced locomotion",
+      "status": "passed",
+      "detail": "jump, crouch, slide, and protected lean"
+    },
+    {
+      "name": "collision and continuous slope",
+      "status": "passed",
+      "detail": "landed at y=0.48 m"
+    },
+    {
       "name": "pause and input reset",
       "status": "passed",
       "detail": ""
@@ -43,12 +53,22 @@
       "detail": "30 → 27"
     },
     {
+      "name": "ADS and reload state machine",
+      "status": "passed",
+      "detail": "27 → 30 rounds"
+    },
+    {
       "name": "player damage",
       "status": "passed",
       "detail": "100 → 83"
     },
     {
-      "name": "complete victory loop",
+      "name": "real ballistic combat",
+      "status": "passed",
+      "detail": "target 100 → 0; player 100 → 91.48089600820094"
+    },
+    {
+      "name": "objective victory loop",
       "status": "passed",
       "detail": "6 hostiles neutralized"
     },
@@ -63,7 +83,7 @@
       "detail": "3 deterministic cycles"
     },
     {
-      "name": "pointer-lock probe",
+      "name": "pointer-lock loss and input reset",
       "status": "passed",
       "detail": ""
     },
@@ -74,20 +94,17 @@
     }
   ],
   "browserDiagnostics": {
-    "consoleErrors": [
-      "Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:4173/favicon.ico:0",
-      "Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:4173/favicon.ico:0"
-    ],
+    "consoleErrors": [],
     "pageErrors": [],
     "requestFailures": [],
     "httpErrors": []
   },
   "gameDiagnostics": {
-    "frameCount": 22,
-    "medianFrameMs": 16.66666753590107,
-    "p95FrameMs": 16.66666753590107,
-    "medianFps": 59.99999687075631,
-    "elapsedMs": 226717.59999999963,
+    "frameCount": 42,
+    "medianFrameMs": 50.00000074505806,
+    "p95FrameMs": 250,
+    "medianFps": 19.99999970197678,
+    "elapsedMs": 348256.3999999985,
     "counters": {
       "listeners": 58,
       "enemies": 7,
@@ -96,26 +113,26 @@
     "errors": [],
     "renderer": {
       "memory": {
-        "geometries": 267,
-        "textures": 87
+        "geometries": 313,
+        "textures": 88
       },
       "render": {
-        "frame": 1440,
-        "calls": 159,
-        "triangles": 28132,
+        "frame": 2289,
+        "calls": 0,
+        "triangles": 0,
         "points": 0,
         "lines": 0
       }
     },
     "rendererInfo": {
       "memory": {
-        "geometries": 267,
-        "textures": 87
+        "geometries": 313,
+        "textures": 88
       },
       "render": {
-        "frame": 1440,
-        "calls": 159,
-        "triangles": 28132,
+        "frame": 2289,
+        "calls": 0,
+        "triangles": 0,
         "points": 0,
         "lines": 0
       }

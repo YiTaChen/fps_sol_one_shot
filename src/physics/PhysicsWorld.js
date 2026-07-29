@@ -10,6 +10,47 @@ const _expanded = new THREE.Box3();
 const _pointA = new THREE.Vector3();
 const _pointB = new THREE.Vector3();
 
+function rampHeightAt(collider, point) {
+  const axis = collider.rampAxis === "x" ? "x" : "z";
+  const low = collider.min[axis];
+  const high = collider.max[axis];
+  const span = Math.max(0.001, high - low);
+  const raw = THREE.MathUtils.clamp((point[axis] - low) / span, 0, 1);
+  const t = collider.rampDirection < 0 ? 1 - raw : raw;
+  return collider.rampBaseY + (collider.rampTopY - collider.rampBaseY) * t;
+}
+
+function rayRamp(origin, direction, collider, maxDistance) {
+  const axis = collider.rampAxis === "x" ? "x" : "z";
+  const low = collider.min[axis];
+  const high = collider.max[axis];
+  const span = Math.max(0.001, high - low);
+  const signedSlope =
+    ((collider.rampTopY - collider.rampBaseY) / span)
+    * (collider.rampDirection < 0 ? -1 : 1);
+  const reference = collider.rampDirection < 0 ? high : low;
+  const denominator = direction.y - signedSlope * direction[axis];
+  if (Math.abs(denominator) < 1e-6) return null;
+  const distance =
+    (collider.rampBaseY + signedSlope * (origin[axis] - reference) - origin.y)
+    / denominator;
+  if (distance < 0 || distance > maxDistance) return null;
+  _rayPoint.copy(direction).multiplyScalar(distance).add(origin);
+  const otherAxis = axis === "x" ? "z" : "x";
+  if (
+    _rayPoint[axis] < low - 0.001
+    || _rayPoint[axis] > high + 0.001
+    || _rayPoint[otherAxis] < collider.min[otherAxis] - 0.001
+    || _rayPoint[otherAxis] > collider.max[otherAxis] + 0.001
+  ) {
+    return null;
+  }
+  _rayNormal.set(0, 1, 0);
+  _rayNormal[axis] = -signedSlope;
+  _rayNormal.normalize();
+  return { distance, point: _rayPoint.clone(), normal: _rayNormal.clone() };
+}
+
 function rayBox(origin, direction, box, maxDistance) {
   _invDirection.set(
     direction.x === 0 ? Number.POSITIVE_INFINITY : 1 / direction.x,
@@ -76,6 +117,11 @@ export class PhysicsWorld {
       mask: collider.mask ?? 0xffffffff,
       material: collider.material || "concrete",
       penetrable: Boolean(collider.penetrable),
+      kind: collider.kind ?? collider.type ?? "box",
+      rampAxis: collider.rampAxis ?? collider.axis ?? "z",
+      rampDirection: Number(collider.rampDirection ?? collider.direction ?? 1) < 0 ? -1 : 1,
+      rampBaseY: Number(collider.rampBaseY ?? collider.baseY ?? min.y),
+      rampTopY: Number(collider.rampTopY ?? collider.topY ?? max.y),
     };
     this.staticColliders.push(record);
     return record;
@@ -112,6 +158,7 @@ export class PhysicsWorld {
       resultPosition.add(_axisDelta);
       const capsuleBox = buildCapsuleBox(resultPosition, capsule);
       for (const collider of this.staticColliders) {
+        if (collider.kind === "ramp") continue;
         if (!capsuleBox.intersectsBox(collider.box)) continue;
         const radius = capsule.radius ?? 0.34;
         const height = capsule.height ?? capsule.standingHeight ?? 1.72;
@@ -141,6 +188,42 @@ export class PhysicsWorld {
         });
       }
     }
+
+    // Ramps use a continuous procedural height plane rather than stacked box
+    // steps. A conservative foot probe snaps only grounded/downward movement,
+    // leaving jumps and mantle arcs unaffected.
+    const radius = capsule.radius ?? 0.34;
+    for (const collider of this.staticColliders) {
+      if (collider.kind !== "ramp") continue;
+      const axis = collider.rampAxis === "x" ? "x" : "z";
+      const otherAxis = axis === "x" ? "z" : "x";
+      if (
+        resultPosition[axis] < collider.min[axis] - radius * 0.25
+        || resultPosition[axis] > collider.max[axis] + radius * 0.25
+        || resultPosition[otherAxis] < collider.min[otherAxis] - radius * 0.55
+        || resultPosition[otherAxis] > collider.max[otherAxis] + radius * 0.55
+      ) {
+        continue;
+      }
+      const surfaceY = rampHeightAt(collider, resultPosition);
+      const stepDelta = surfaceY - resultPosition.y;
+      if (delta.y <= 0 && stepDelta >= -0.34 && stepDelta <= 0.34) {
+        resultPosition.y = surfaceY;
+        grounded = true;
+        collisions.push({
+          collider,
+          axis: "ramp",
+          normal: _rayNormal
+            .set(0, 1, 0)
+            .setComponent(axis === "x" ? 0 : 2, -(
+              (collider.rampTopY - collider.rampBaseY)
+              / Math.max(0.001, collider.max[axis] - collider.min[axis])
+            ) * collider.rampDirection)
+            .normalize()
+            .clone(),
+        });
+      }
+    }
     resultPosition.x = THREE.MathUtils.clamp(
       resultPosition.x,
       this.bounds.min.x + 0.4,
@@ -163,18 +246,25 @@ export class PhysicsWorld {
   capsuleClear(position, capsule = {}) {
     const capsuleBox = buildCapsuleBox(position, capsule);
     return !this.staticColliders.some((collider) =>
-      capsuleBox.intersectsBox(collider.box));
+      collider.kind !== "ramp" && capsuleBox.intersectsBox(collider.box));
   }
 
   raycast(origin, direction, maxDistance = 100, mask = 0xffffffff) {
     let closest = null;
     for (const collider of this.staticColliders) {
       if ((collider.mask & mask) === 0) continue;
-      const hit = rayBox(origin, direction, collider.box, maxDistance);
+      const hit = collider.kind === "ramp"
+        ? rayRamp(origin, direction, collider, maxDistance)
+        : rayBox(origin, direction, collider.box, maxDistance);
       if (!hit || (closest && hit.distance >= closest.distance)) continue;
-      _rayPoint.copy(direction).multiplyScalar(hit.distance).add(origin);
-      _rayNormal.set(0, 0, 0);
-      _rayNormal[hit.axis] = hit.sign;
+      if (collider.kind !== "ramp") {
+        _rayPoint.copy(direction).multiplyScalar(hit.distance).add(origin);
+        _rayNormal.set(0, 0, 0);
+        _rayNormal[hit.axis] = hit.sign;
+      } else {
+        _rayPoint.copy(hit.point);
+        _rayNormal.copy(hit.normal);
+      }
       closest = {
         distance: hit.distance,
         point: _rayPoint.clone(),
@@ -247,4 +337,3 @@ export class PhysicsWorld {
 }
 
 export default PhysicsWorld;
-

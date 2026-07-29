@@ -163,6 +163,13 @@ const HERO_PROP_PLACEMENTS = Object.freeze([
   ['road-barrier', -31.4, 0.02, -1.9, 0.08, 0.92],
   ['traffic-cone', -34.0, 0.02, 3.75, -0.18, 0.9],
   ['cable-spool', -28.7, 0.02, 4.35, 0.14, 0.86],
+  ['shade-canopy', -20.5, 0.02, 4.15, 0.04, 0.86],
+  ['market-table', -20.4, 0.02, 4.2, 0.04, 0.82],
+  ['produce-basket', -21.1, 0.88, 4.15, 0.08, 0.78],
+  ['produce-crate', -19.55, 0.02, 4.1, -0.1, 0.82],
+  ['sack-stack', -18.45, 0.02, 4.35, Math.PI * 0.5, 0.72],
+  ['wheelbarrow', -8.4, 0.02, 4.45, -0.16, 0.78],
+  ['produce-basket', -6.8, 0.02, 4.65, 0.1, 0.8],
   ['shipping-crate', 25.5, 0.02, -4.1, 0.2, 1],
   ['produce-crate', -24.5, 0.02, -4.3, -0.2, 1],
   ['pallet', 30, 0.02, -28.5, 0.1, 1],
@@ -393,11 +400,11 @@ export class WorldBuilder {
     });
     const enemySpawns = this.createEnemySpawns();
     const capturePoses = Object.freeze({
-      wideStreet: capturePose('wide-street', [-46, 1.84, -3.2], [9, 1.48, -0.15], 66),
-      closeFacade: capturePose('close-facade', [-37.1, 1.8, -2.15], [-40, 2.0, -6.15], 68),
-      enterableInterior: capturePose('enterable-interior', [-37.1, 1.55, -6.75], [-37.25, 1.15, -13], 70),
-      hipFire: capturePose('hip-fire', [-37.1, 1.55, -6.75], [-37.25, 1.15, -13], 70),
-      ads: capturePose('ads', [-37.1, 1.55, -6.75], [-37.25, 1.15, -13], 62),
+      wideStreet: capturePose('wide-street', [-44.2, 2.35, 1.2], [-5, 1.25, 0], 64),
+      closeFacade: capturePose('close-facade', [-36.9, 2.08, -1.8], [-39.3, 2.75, -6.15], 67),
+      enterableInterior: capturePose('enterable-interior', [-42.9, 1.55, -6.55], [-37.6, 1.2, -12.8], 66),
+      hipFire: capturePose('hip-fire', [-42.9, 1.55, -6.55], [-37.6, 1.2, -12.8], 66),
+      ads: capturePose('ads', [-42.9, 1.55, -6.55], [-37.6, 1.2, -12.8], 60),
       enemy: capturePose('enemy', [23.5, 1.72, 5], [31, 1.35, -2], 47),
       activeCombat: capturePose('active-combat', [-8, 2.0, 5], [14, 1.55, -2], 60),
     });
@@ -522,23 +529,30 @@ export class WorldBuilder {
       });
     }
 
-    const dock = this.addSurface(
-      'concreteAggregate',
-      new THREE.Vector3(22, 0.42, 5.2),
-      new THREE.Vector3(-36, 0.21, -34.9),
-      'elevation:north-loading-dock',
-      { radius: 0.05, surface: 'concrete' },
-    );
-    this.colliders.push(
-      createBoxCollider({
-        id: 'terrain:raised-dock',
-        center: new THREE.Vector3(-36, 0.21, -34.9),
-        size: new THREE.Vector3(22, 0.42, 5.2),
-        material: 'concrete',
-        object: dock,
-        tags: ['terrain', 'elevation', 'mantle'],
-      }),
-    );
+    const dockCollisionSections = [
+      ['left', -38.125, -34.9, 17.75, 5.2],
+      ['right', -25.875, -34.9, 1.75, 5.2],
+      ['ramp-landing', -28, -36.1, 2.5, 2.8],
+    ];
+    for (const [id, x, z, width, depth] of dockCollisionSections) {
+      const dockSection = this.addSurface(
+        'concreteAggregate',
+        new THREE.Vector3(width, 0.42, depth),
+        new THREE.Vector3(x, 0.21, z),
+        `elevation:north-loading-dock:${id}`,
+        { radius: 0.05, surface: 'concrete' },
+      );
+      this.colliders.push(
+        createBoxCollider({
+          id: `terrain:raised-dock:${id}`,
+          center: new THREE.Vector3(x, 0.21, z),
+          size: new THREE.Vector3(width, 0.42, depth),
+          material: 'concrete',
+          object: dockSection,
+          tags: ['terrain', 'elevation', 'mantle'],
+        }),
+      );
+    }
     this.surfaceZones.push({
       id: 'raised-dock',
       minX: -47,
@@ -569,6 +583,66 @@ export class WorldBuilder {
       );
     }
     this.architecture.use('exterior-stair');
+
+    // A true continuous loading ramp exercises the controller's slope path.
+    // The authored wedge and its analytic height collider share exact bounds.
+    const rampWidth = 2.4;
+    const rampRun = 3.6;
+    const rampRise = 0.5;
+    const rampGeometry = this.geometryKit.profile(
+      [
+        [-rampRun * 0.5, -rampRise * 0.5],
+        [rampRun * 0.5, -rampRise * 0.5],
+        [rampRun * 0.5, rampRise * 0.5],
+        [-rampRun * 0.5, -rampRise * 0.42],
+      ],
+      rampWidth,
+      0.025,
+      2,
+    );
+    const ramp = new THREE.Mesh(rampGeometry, this.materials.get('concreteAggregate'));
+    ramp.name = 'elevation:continuous-loading-ramp';
+    ramp.position.set(-28, rampRise * 0.5, -32.9);
+    ramp.rotation.y = Math.PI * 0.5;
+    ramp.receiveShadow = true;
+    ramp.castShadow = false;
+    this.root.add(ramp);
+    this.colliders.push({
+      id: 'terrain:continuous-loading-ramp',
+      kind: 'ramp',
+      min: new THREE.Vector3(-29.2, 0, -34.7),
+      max: new THREE.Vector3(-26.8, rampRise, -31.1),
+      rampAxis: 'z',
+      rampDirection: -1,
+      rampBaseY: 0,
+      rampTopY: rampRise,
+      material: 'concrete',
+      object: ramp,
+      tags: ['terrain', 'elevation', 'slope'],
+    });
+    for (const [side, x] of [['west', -29.28], ['east', -26.72]]) {
+      this.colliders.push(
+        createBoxCollider({
+          id: `terrain:continuous-loading-ramp:${side}-edge`,
+          center: new THREE.Vector3(x, rampRise * 0.5, -32.9),
+          size: new THREE.Vector3(0.12, rampRise + 0.16, rampRun),
+          material: 'metal',
+          object: ramp,
+          tags: ['terrain', 'elevation', 'slope-edge'],
+        }),
+      );
+    }
+    const rampAngle = Math.atan2(rampRise, rampRun);
+    for (const x of [-29.25, -26.75]) {
+      this.batcher.box(
+        'paintedMetal',
+        _position.set(x, rampRise * 0.5 + 0.08, -32.9),
+        _quaternion.setFromEuler(new THREE.Euler(rampAngle, 0, 0)),
+        _scale.set(0.09, 0.14, rampRun),
+        { name: 'loading-ramp-edge', radius: 0.028 },
+      );
+    }
+    this.architecture.use('loading-canopy');
 
     for (const z of [-6.25, 6.25]) {
       for (let x = -48; x <= 48; x += 2) {
@@ -785,6 +859,56 @@ export class WorldBuilder {
         },
       );
     };
+    const addSoftBundle = (material, size, position, options = {}) => {
+      localToWorld(
+        _local.set(position[0], position[1], position[2]),
+        spec.position,
+        spec.yaw,
+        _position,
+      );
+      _quaternion.setFromEuler(
+        new THREE.Euler(
+          options.rotation?.[0] ?? 0,
+          spec.yaw + (options.rotation?.[1] ?? 0),
+          options.rotation?.[2] ?? 0,
+        ),
+      );
+      this.batcher.softBundle(
+        material,
+        _position,
+        _quaternion,
+        _scale.set(size[0], size[1], size[2]),
+        {
+          name: 'saffron-authored-soft-goods',
+          variant: options.variant ?? 0,
+        },
+      );
+    };
+    const addVessel = (material, size, position, options = {}) => {
+      localToWorld(
+        _local.set(position[0], position[1], position[2]),
+        spec.position,
+        spec.yaw,
+        _position,
+      );
+      _quaternion.setFromEuler(
+        new THREE.Euler(
+          options.rotation?.[0] ?? 0,
+          spec.yaw + (options.rotation?.[1] ?? 0),
+          options.rotation?.[2] ?? 0,
+        ),
+      );
+      this.batcher.vessel(
+        material,
+        _position,
+        _quaternion,
+        _scale.set(size[0], size[1], size[2]),
+        {
+          name: 'saffron-profiled-vessel',
+          variant: options.variant ?? 0,
+        },
+      );
+    };
 
     // A recognizable service counter: recessed front panels, timber worktop,
     // register, weighing scale and a low impulse-buy shelf.
@@ -803,6 +927,18 @@ export class WorldBuilder {
     addBox('bareMetal', [0.42, 0.08, 0.32], [0.75, 1.01, 3.0]);
     addCylinder('ceramic', [0.46, 0.08, 0.46], [0.75, 1.08, 3.0], {
       radialSegments: 14,
+    });
+    addVessel('ceramic', [0.18, 0.31, 0.18], [1.28, 1.13, 3.0], {
+      variant: 1,
+      rotation: [0.02, 0.12, -0.03],
+    });
+    addVessel('plasterBlue', [0.14, 0.25, 0.14], [1.55, 1.08, 3.03], {
+      variant: 2,
+      rotation: [-0.02, -0.16, 0.02],
+    });
+    addSoftBundle('fabric', [0.34, 0.18, 0.27], [2.05, 1.05, 3.02], {
+      variant: 3,
+      rotation: [0, 0.22, Math.PI * 0.5],
     });
     addBox('wood', [2.7, 0.09, 0.34], [1.6, 0.18, 3.55]);
     for (let cubby = 0; cubby < 5; cubby += 1) {
@@ -828,17 +964,17 @@ export class WorldBuilder {
       });
       for (let item = 0; item < 6; item += 1) {
         const angle = (item / 6) * Math.PI * 2;
-        addCylinder(
+        addSoftBundle(
           producePalette[(bin + item) % producePalette.length],
-          [0.16, 0.14 + (item % 2) * 0.04, 0.16],
+          [0.18, 0.15 + (item % 2) * 0.04, 0.18],
           [
             binX + Math.cos(angle) * 0.25,
             0.57 + (item % 3) * 0.035,
             1.52 + Math.sin(angle) * 0.2,
           ],
           {
-            rotation: [0, 0, Math.PI * 0.5],
-            radialSegments: 8,
+            rotation: [0, angle * 0.7, 0],
+            variant: bin * 6 + item,
           },
         );
       }
@@ -862,6 +998,27 @@ export class WorldBuilder {
           radialSegments: 10,
         },
       );
+    }
+    for (let shelf = 0; shelf < 3; shelf += 1) {
+      for (let item = 0; item < 4; item += 1) {
+        const x = -5.05 + item * 0.32;
+        const y = 0.54 + shelf * 0.52;
+        if ((shelf + item) % 2 === 0) {
+          addVessel(
+            item % 3 === 0 ? 'ceramic' : 'plasterBlue',
+            [0.14, 0.22 + (item % 2) * 0.04, 0.14],
+            [x, y, 3.92],
+            { variant: shelf + item },
+          );
+        } else {
+          addSoftBundle(
+            item % 3 === 0 ? 'foliage' : 'fabric',
+            [0.18, 0.17, 0.19],
+            [x, y, 3.92],
+            { variant: shelf * 4 + item },
+          );
+        }
+      }
     }
     addBox('wood', [3.25, 0.7, 0.08], [3.15, 1.82, -1.78], {
       module: 'fascia-sign',

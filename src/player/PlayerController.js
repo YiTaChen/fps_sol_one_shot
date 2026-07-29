@@ -218,6 +218,7 @@ export class PlayerController {
 
     this.health = this.options.maxHealth;
     this.maxHealth = this.options.maxHealth;
+    this.damageFloor = null;
     this.enabled = true;
     this.alive = true;
     this.grounded = false;
@@ -320,6 +321,7 @@ export class PlayerController {
     this.previousPosition.copy(this.position);
     this.velocity.set(0, 0, 0);
     this.health = this.maxHealth;
+    this.damageFloor = null;
     this.yaw = this.options.yaw;
     this.pitch = 0;
     this.alive = true;
@@ -393,7 +395,13 @@ export class PlayerController {
     const damage = Math.max(0, Number(amount) || 0);
     if (damage <= 0) return false;
 
-    this.health = Math.max(0, this.health - damage);
+    const configuredFloor = this.damageFloor == null
+      ? Number.NaN
+      : Number(this.damageFloor);
+    const damageFloor = Number.isFinite(configuredFloor)
+      ? THREE.MathUtils.clamp(configuredFloor, 1, this.maxHealth)
+      : 0;
+    this.health = Math.max(damageFloor, this.health - damage);
     let angle = 0;
     if (direction && isVectorLike(direction)) {
       DAMAGE_DIRECTION.copy(direction).setY(0);

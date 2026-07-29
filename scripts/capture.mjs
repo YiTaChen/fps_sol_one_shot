@@ -41,6 +41,11 @@ async function main() {
     const diagnostics = attachDiagnostics(page);
     await mkdir(OUTPUT, { recursive: true });
 
+    const knownViewIds = new Set(CAPTURE_VIEWS.map((view) => view.id));
+    const unknownViews = [...VIEW_FILTER].filter((id) => !knownViewIds.has(id));
+    if (unknownViews.length) {
+      throw new Error(`Unknown FPS_CAPTURE_VIEWS: ${unknownViews.join(', ')}`);
+    }
     const selectedViews = VIEW_FILTER.size
       ? CAPTURE_VIEWS.filter((view) => VIEW_FILTER.has(view.id))
       : CAPTURE_VIEWS;
@@ -55,17 +60,23 @@ async function main() {
       });
       const captureState = await page.evaluate(async (viewId) => {
         const api = window.__FPS_TEST__;
-        await api.setCapturePose(viewId);
+        let poseResult = await api.setCapturePose(viewId);
         if (viewId === 'active-combat') {
           await api.start();
           api.setInput({ KeyW: true, ShiftLeft: true });
           await api.step(24);
-          api.setInput({ KeyW: false, ShiftLeft: false });
+          api.setInput({});
+          // Restage the authored combat target after the movement lead-in so
+          // the verification shot follows the actual camera ray, not an enemy
+          // that has already advanced away from it.
+          poseResult = await api.setCapturePose(viewId);
           const before = api.snapshot();
           await api.fire(1);
           await api.step(3);
           const after = api.snapshot();
-          const targetBefore = before.enemies.find((enemy) => enemy.alive);
+          const targetBefore = before.enemies.find(
+            (enemy) => enemy.id === poseResult?.targetId,
+          ) ?? before.enemies.find((enemy) => enemy.alive);
           const targetAfter = after.enemies.find((enemy) => enemy.id === targetBefore?.id);
           if (!targetBefore || !targetAfter || targetAfter.health >= targetBefore.health) {
             throw new Error('Active-combat capture did not register a real ballistic hit');
@@ -104,11 +115,18 @@ async function main() {
       process.stdout.write(`✓ ${view.file} — ${view.description}\n`);
     }
 
-    assertNoPageErrors(diagnostics, [/favicon\.ico/i]);
+    assertNoPageErrors(diagnostics);
+    if (!VIEW_FILTER.size && manifest.captures.length !== CAPTURE_VIEWS.length) {
+      throw new Error(
+        `Full capture produced ${manifest.captures.length}/${CAPTURE_VIEWS.length} views`,
+      );
+    }
     manifest.browserDiagnostics = diagnostics;
+    manifest.mode = VIEW_FILTER.size ? 'partial' : 'full';
     manifest.completedAt = new Date().toISOString();
+    const manifestFile = VIEW_FILTER.size ? 'manifest.partial.json' : 'manifest.json';
     await writeFile(
-      path.join(OUTPUT, 'manifest.json'),
+      path.join(OUTPUT, manifestFile),
       `${JSON.stringify(manifest, null, 2)}\n`,
     );
     process.stdout.write(`\nCaptured ${manifest.captures.length} deterministic views to ${OUTPUT}\n`);

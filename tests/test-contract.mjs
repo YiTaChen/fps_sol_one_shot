@@ -11,6 +11,7 @@ export const REQUIRED_TEST_METHODS = Object.freeze([
   'snapshot',
   'setInput',
   'step',
+  'teleport',
   'fire',
   'damagePlayer',
   'killEnemy',
@@ -19,6 +20,7 @@ export const REQUIRED_TEST_METHODS = Object.freeze([
   'runPerformance',
   'pointerLock',
   'pointerLocked',
+  'simulatePointerLockLoss',
 ]);
 
 export const CAPTURE_VIEWS = Object.freeze([
@@ -65,4 +67,3 @@ export function missingMethods(capabilities) {
     (name) => capabilities.methods?.[name] !== 'function',
   );
 }
-

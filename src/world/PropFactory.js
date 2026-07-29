@@ -217,6 +217,28 @@ export class PropFactory {
     );
   }
 
+  softBundle(origin, yaw, propScale, material, position, scale, rotation = null, variant = 0) {
+    const transform = localTransform(origin, yaw, propScale, position, rotation);
+    this.batcher.softBundle(
+      material,
+      transform.position,
+      transform.quaternion,
+      _scale.set(scale[0] * propScale, scale[1] * propScale, scale[2] * propScale),
+      { name: 'prop-soft-bundle', variant },
+    );
+  }
+
+  vessel(origin, yaw, propScale, material, position, scale, rotation = null, variant = 0) {
+    const transform = localTransform(origin, yaw, propScale, position, rotation);
+    this.batcher.vessel(
+      material,
+      transform.position,
+      transform.quaternion,
+      _scale.set(scale[0] * propScale, scale[1] * propScale, scale[2] * propScale),
+      { name: 'prop-profiled-vessel', variant },
+    );
+  }
+
   addCollider(type, origin, yaw, scale, options) {
     if (NO_COLLISION.has(type) || options.collider === false) {
       return;
@@ -276,7 +298,16 @@ export class PropFactory {
         this.box(origin, yaw, s, 'fabric', [0, 2.28, 0], [2.65, 0.1, 1.68], [-0.08, 0, 0]);
         this.box(origin, yaw, s, 'paintedMetal', [0, 2.36, -0.05], [2.32, 0.16, 0.08]);
         for (let i = -3; i <= 3; i += 1) {
-          this.box(origin, yaw, s, i & 1 ? 'plasterOchre' : 'foliage', [i * 0.3, 1.04, 0.05], [0.22, 0.17, 0.3]);
+          this.softBundle(
+            origin,
+            yaw,
+            s,
+            i & 1 ? 'plasterOchre' : 'foliage',
+            [i * 0.3, 1.08 + Math.abs(i % 2) * 0.02, 0.05],
+            [0.24, 0.19, 0.28],
+            [0, i * 0.17, 0],
+            i + 3,
+          );
         }
         break;
       }
@@ -288,16 +319,30 @@ export class PropFactory {
           this.box(origin, yaw, s, 'wood', [0, 0.22 + shelf * 0.52, 0], [1.65, 0.09, 0.54]);
           for (let item = -2; item <= 2; item += 1) {
             const palette = ['ceramic', 'fabric', 'plasterOchre', 'foliage', 'plasterBlue'];
-            this.box(
-              origin,
-              yaw,
-              s,
-              palette[(item + 2 + shelf) % palette.length],
-              [item * 0.27, 0.36 + shelf * 0.52, 0],
-              [0.16, 0.24 + ((item + shelf) & 1) * 0.05, 0.22],
-              [0, item * 0.025, 0],
-              { radius: 0.075 },
-            );
+            const material = palette[(item + 2 + shelf) % palette.length];
+            if ((item + shelf) % 3 === 0) {
+              this.vessel(
+                origin,
+                yaw,
+                s,
+                material,
+                [item * 0.27, 0.37 + shelf * 0.52, 0],
+                [0.18, 0.29 + ((item + shelf) & 1) * 0.04, 0.18],
+                null,
+                shelf + item + 3,
+              );
+            } else {
+              this.softBundle(
+                origin,
+                yaw,
+                s,
+                material,
+                [item * 0.27, 0.36 + shelf * 0.52, 0],
+                [0.19, 0.24 + ((item + shelf) & 1) * 0.04, 0.23],
+                [0, item * 0.11, 0],
+                shelf * 5 + item + 2,
+              );
+            }
           }
         }
         break;
@@ -323,8 +368,17 @@ export class PropFactory {
         for (const z of [-0.26, 0.26]) {
           this.box(origin, yaw, s, 'wood', [0, 0.26, z], [0.78, 0.34, 0.055]);
         }
-        for (const x of [-0.22, 0, 0.22]) {
-          this.cylinder(origin, yaw, s, 'foliage', [x, 0.52, 0], [0.16, 0.16, 0.16], [0, 0, Math.PI * 0.5], { radialSegments: 8 });
+        for (const [index, x] of [-0.22, 0, 0.22].entries()) {
+          this.softBundle(
+            origin,
+            yaw,
+            s,
+            index === 1 ? 'plasterOchre' : 'foliage',
+            [x, 0.53, 0],
+            [0.17, 0.16, 0.18],
+            [0, index * 0.4, 0],
+            index,
+          );
         }
         break;
       }
@@ -561,7 +615,20 @@ export class PropFactory {
         this.torus(origin, yaw, s, 'wood', [0, 0.45, 0], [0.64, 0.64, 0.64], [Math.PI * 0.5, 0, 0]);
         for (let fruit = 0; fruit < 7; fruit += 1) {
           const angle = (fruit / 7) * Math.PI * 2;
-          this.cylinder(origin, yaw, s, fruit & 1 ? 'plasterOchre' : 'foliage', [Math.cos(angle) * 0.16, 0.48 + (fruit % 2) * 0.05, Math.sin(angle) * 0.16], [0.16, 0.14, 0.16], [0, 0, Math.PI * 0.5], { radialSegments: 8 });
+          this.softBundle(
+            origin,
+            yaw,
+            s,
+            fruit & 1 ? 'plasterOchre' : 'foliage',
+            [
+              Math.cos(angle) * 0.16,
+              0.48 + (fruit % 2) * 0.05,
+              Math.sin(angle) * 0.16,
+            ],
+            [0.17, 0.15, 0.17],
+            [0, angle, 0],
+            fruit,
+          );
         }
         break;
       }
@@ -646,7 +713,16 @@ export class PropFactory {
         for (let row = 0; row < 3; row += 1) {
           const count = row === 2 ? 2 : 3;
           for (let i = 0; i < count; i += 1) {
-            this.box(origin, yaw, s, row & 1 ? 'fabric' : 'sand', [(i - (count - 1) * 0.5) * 0.46, 0.19 + row * 0.29, 0], [0.52, 0.26, 0.72], [0, (i + row) * 0.08, 0], { radius: 0.15 });
+            this.softBundle(
+              origin,
+              yaw,
+              s,
+              row & 1 ? 'fabric' : 'sand',
+              [(i - (count - 1) * 0.5) * 0.46, 0.19 + row * 0.29, 0],
+              [0.56, 0.28, 0.76],
+              [0, (i + row) * 0.08, Math.PI * 0.5],
+              row * 3 + i,
+            );
           }
         }
         break;

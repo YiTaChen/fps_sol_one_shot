@@ -22,7 +22,6 @@ const _damageDirection = new THREE.Vector3(0, 0, 1);
 const _capturePosition = new THREE.Vector3();
 const _captureTarget = new THREE.Vector3();
 const _captureDirection = new THREE.Vector3();
-const _captureSide = new THREE.Vector3();
 const _captureQuaternion = new THREE.Quaternion();
 
 const FALLBACK_CAPTURE_POSES = Object.freeze({
@@ -153,6 +152,7 @@ export class Game {
     this.abort = new AbortController();
     this.unsubscribers = [];
     this.captureOverride = null;
+    this.captureTargetId = null;
     this.captureMode = options.captureMode || null;
     this.performanceSamples = [];
 
@@ -318,6 +318,7 @@ export class Game {
     this.rifle.setEnabled(true);
     this.input.enabled = true;
     this.captureOverride = null;
+    this.captureTargetId = null;
     this.clock.clearAccumulator();
     if (!this.options.capture && !this.manualSimulation) {
       this.input.requestPointerLock().catch(() => {});
@@ -414,7 +415,15 @@ export class Game {
   async manualStep(frames = 1) {
     const count = THREE.MathUtils.clamp(Math.floor(frames), 0, 3600);
     for (let i = 0; i < count; i += 1) this.fixedUpdate(FIXED_STEP);
-    this.update(FIXED_STEP, 1);
+    // Fixed simulation can be advanced in one deterministic batch, but
+    // presentation dampers must still receive the elapsed wall-clock span.
+    // Cap it to avoid feeding multi-second deltas into camera/effect easing.
+    const presentationDelta = THREE.MathUtils.clamp(
+      count * FIXED_STEP,
+      FIXED_STEP,
+      0.25,
+    );
+    this.update(presentationDelta, 1);
     await new Promise((resolve) => requestAnimationFrame(resolve));
     return this.snapshot();
   }
@@ -437,37 +446,75 @@ export class Game {
   async runPerformance(frameCount = 600, options = {}) {
     const frames = THREE.MathUtils.clamp(Math.floor(frameCount), 60, 1200);
     if (options.quality) this.applyQuality(options.quality);
-    this.performanceRunning = true;
-    const samples = [];
-    let previous = performance.now();
-    for (let i = 0; i < frames; i += 1) {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-      const now = performance.now();
-      samples.push(now - previous);
-      previous = now;
-      if (options.movement) {
-        const phase = i % 240;
-        this.input.setSynthetic({
-          KeyW: phase < 160,
-          KeyD: phase >= 160,
-          ShiftLeft: phase < 80,
-          fire: Boolean(options.combat && i % 7 < 2),
-        });
-      }
-      this.fixedUpdate(FIXED_STEP);
-      this.update(FIXED_STEP, 1);
+    if (
+      Array.isArray(options.resolution)
+      && Number.isFinite(options.resolution[0])
+      && Number.isFinite(options.resolution[1])
+    ) {
+      this.rendering.resize(options.resolution[0], options.resolution[1]);
     }
-    this.input.clearSynthetic();
-    this.performanceRunning = false;
+    const samples = [];
+    const movementStart = this.player.position.clone();
+    const previousPosition = this.player.position.clone();
+    const startingAmmo = this.rifle.magazine + this.rifle.reserve;
+    const healthFloor = Number(options.healthFloor);
+    const previousDamageFloor = this.player.damageFloor;
+    let movementDistance = 0;
+    let reloads = 0;
+    let previous = performance.now();
+    this.performanceRunning = true;
+    if (Number.isFinite(healthFloor)) this.player.damageFloor = healthFloor;
+    try {
+      for (let i = 0; i < frames; i += 1) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const now = performance.now();
+        samples.push(now - previous);
+        previous = now;
+        if (options.movement) {
+          const phase = i % 240;
+          this.input.setSynthetic({
+            KeyW: phase < 160,
+            KeyD: phase >= 160,
+            ShiftLeft: phase < 80,
+            fire: Boolean(options.combat && i % 7 < 2),
+          });
+        }
+        if (
+          options.combat
+          && !this.rifle.reloading
+          && this.rifle.magazine <= 0
+          && this.rifle.reserve > 0
+          && this.rifle.requestReload()
+        ) {
+          reloads += 1;
+        }
+        this.fixedUpdate(FIXED_STEP);
+        this.update(FIXED_STEP, 1);
+        movementDistance += this.player.position.distanceTo(previousPosition);
+        previousPosition.copy(this.player.position);
+      }
+    } finally {
+      this.input.clearSynthetic();
+      this.performanceRunning = false;
+      this.player.damageFloor = previousDamageFloor;
+    }
     this.performanceSamples = samples;
     const medianFrameMs = percentile(samples, 0.5);
     const p95FrameMs = percentile(samples, 0.95);
+    const endingAmmo = this.rifle.magazine + this.rifle.reserve;
     return {
       frames,
       frameTimes: [...samples],
       medianFrameMs,
       p95FrameMs,
       medianFps: medianFrameMs > 0 ? 1000 / medianFrameMs : 0,
+      movementDistance,
+      displacement: this.player.position.distanceTo(movementStart),
+      shotsFired: Math.max(0, startingAmmo - endingAmmo),
+      reloads,
+      healthFloor: Number.isFinite(Number(options.healthFloor))
+        ? Number(options.healthFloor)
+        : null,
     };
   }
 
@@ -482,6 +529,7 @@ export class Game {
 
   setCapturePose(name) {
     this.captureMode = name;
+    this.captureTargetId = null;
     const pose = this.getCapturePose(name);
     this.captureOverride = {
       position: toVector(pose.position ?? pose.camera, _capturePosition)?.clone()
@@ -535,13 +583,9 @@ export class Game {
           } else {
             _captureDirection.normalize();
           }
-          _captureSide
-            .set(-_captureDirection.z, 0, _captureDirection.x)
-            .multiplyScalar(0.08);
           heroEnemy.rig.root.position
             .copy(this.player.position)
-            .addScaledVector(_captureDirection, 8.6)
-            .add(_captureSide);
+            .addScaledVector(_captureDirection, 8.6);
           heroEnemy.rig.root.position.y = 0.015;
           heroEnemy.groundY = 0.015;
           heroEnemy.rig.lastGroundY = 0.015;
@@ -562,6 +606,7 @@ export class Game {
           heroEnemy.shotTimer = 0;
           heroEnemy.state = EnemyState.FIRE;
           heroEnemy.renderAim = 1;
+          this.captureTargetId = heroEnemy.id;
           for (let frame = 0; frame < 72; frame += 1) {
             heroEnemy.rig.animate(FIXED_STEP, 0, 1, frame > 64, 0, false);
           }
@@ -579,11 +624,11 @@ export class Game {
           }
           this.captureOverride.position
             .copy(enemy.rig.root.position)
-            .add(new THREE.Vector3(2.65, 1.62, 3.2));
+            .add(new THREE.Vector3(2.35, 1.55, 2.65));
           this.captureOverride.target
             .copy(enemy.rig.root.position)
             .add(new THREE.Vector3(0, 1.18, 0));
-          this.captureOverride.fov = 46;
+          this.captureOverride.fov = 43;
           _captureDirection
             .subVectors(this.captureOverride.position, enemy.rig.root.position)
             .setY(0)
@@ -591,17 +636,20 @@ export class Game {
           enemy.rig.root.rotation.y = Math.atan2(
             -_captureDirection.x,
             -_captureDirection.z,
-          ) + 0.32;
-          enemy.renderMotion = 0.16;
+          ) + 0.78;
+          enemy.renderMotion = 0.38;
           enemy.renderAim = 1;
           for (let frame = 0; frame < 84; frame += 1) {
-            enemy.rig.animate(FIXED_STEP, 0.16, 1, false, 0, false);
+            enemy.rig.animate(FIXED_STEP, 0.38, 1, false, 0, false);
           }
         }
       }
       this.applyCaptureCamera();
     }
-    return this.captureOverride ?? { mode: name };
+    return this.captureOverride ?? {
+      mode: name,
+      targetId: this.captureTargetId,
+    };
   }
 
   applyCaptureCamera() {
@@ -744,6 +792,13 @@ export class Game {
       },
       pointerLocked: async () =>
         document.pointerLockElement === this.rendering.renderer.domElement,
+      simulatePointerLockLoss: async () => {
+        this.events.emit("input:pointer-lock", {
+          locked: false,
+          source: "test-simulation",
+        });
+        return this.stateSnapshot();
+      },
     };
     window.__FPS_TEST__ = Object.freeze(api);
   }

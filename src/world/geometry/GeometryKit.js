@@ -84,6 +84,76 @@ export class GeometryKit {
     return this.cache.get(key);
   }
 
+  /**
+   * A deterministic, deliberately non-primitive soft parcel/produce shape.
+   * The asymmetric vertex displacement, flattened base and pinched top keep
+   * repeated market goods from reading as spheres or anonymous boxes.
+   */
+  softBundle(variant = 0) {
+    const safeVariant = Math.abs(variant | 0) % 5;
+    const key = `soft-bundle:${safeVariant}`;
+    if (!this.cache.has(key)) {
+      const geometry = new THREE.SphereGeometry(0.5, 14, 9);
+      const position = geometry.getAttribute('position');
+      for (let index = 0; index < position.count; index += 1) {
+        const x = position.getX(index);
+        const y = position.getY(index);
+        const z = position.getZ(index);
+        const angle = Math.atan2(z, x);
+        const vertical = y + 0.5;
+        const lobe =
+          1
+          + Math.sin(angle * (3 + (safeVariant & 1)) + safeVariant * 1.7) * 0.055
+          + Math.sin(vertical * 8.2 + safeVariant) * 0.025;
+        const pinch = 1 - Math.max(0, vertical - 0.76) * 0.2;
+        position.setXYZ(
+          index,
+          x * lobe * pinch,
+          Math.max(-0.43, y + Math.sin(angle * 2 + safeVariant) * 0.012),
+          z * (lobe + Math.cos(angle * 2.7 + safeVariant) * 0.035) * pinch,
+        );
+      }
+      position.needsUpdate = true;
+      geometry.computeVertexNormals();
+      geometry.computeBoundingBox();
+      geometry.computeBoundingSphere();
+      geometry.name = key;
+      this.cache.set(key, geometry);
+    }
+    return this.cache.get(key);
+  }
+
+  /**
+   * Authored lathed vessel profile used for bottles, jars and canisters.
+   * The shoulder, neck, lip and inset base provide a functional silhouette.
+   */
+  vessel(variant = 0) {
+    const safeVariant = Math.abs(variant | 0) % 3;
+    const key = `vessel:${safeVariant}`;
+    if (!this.cache.has(key)) {
+      const shoulder = safeVariant === 1 ? 0.39 : 0.34;
+      const body = safeVariant === 2 ? 0.43 : 0.38;
+      const points = [
+        new THREE.Vector2(0.24, -0.5),
+        new THREE.Vector2(body, -0.44),
+        new THREE.Vector2(body + 0.025, 0.18),
+        new THREE.Vector2(shoulder, 0.29),
+        new THREE.Vector2(0.2, 0.37),
+        new THREE.Vector2(0.18, 0.46),
+        new THREE.Vector2(0.23, 0.49),
+        new THREE.Vector2(0.23, 0.54),
+        new THREE.Vector2(0.05, 0.56),
+      ];
+      const geometry = new THREE.LatheGeometry(points, 18);
+      geometry.computeVertexNormals();
+      geometry.computeBoundingBox();
+      geometry.computeBoundingSphere();
+      geometry.name = key;
+      this.cache.set(key, geometry);
+    }
+    return this.cache.get(key);
+  }
+
   plane() {
     const key = 'plane:unit';
     if (!this.cache.has(key)) {
@@ -284,6 +354,28 @@ export class InstanceBatcher {
     );
   }
 
+  softBundle(materialId, position, quaternion, scale, options = {}) {
+    this.add(
+      this.geometryKit.softBundle(options.variant ?? 0),
+      materialId,
+      position,
+      quaternion,
+      scale,
+      options,
+    );
+  }
+
+  vessel(materialId, position, quaternion, scale, options = {}) {
+    this.add(
+      this.geometryKit.vessel(options.variant ?? 0),
+      materialId,
+      position,
+      quaternion,
+      scale,
+      options,
+    );
+  }
+
   plane(materialId, position, quaternion, scale, options = {}) {
     this.add(this.geometryKit.plane(), materialId, position, quaternion, scale, options);
   }
@@ -389,4 +481,3 @@ export function createProfileMesh(
   mesh.userData.surface = material.userData?.surface ?? materialId;
   return mesh;
 }
-

@@ -14,23 +14,161 @@ const IK_LOWER_DIRECTION = new THREE.Vector3();
 const IK_LOCAL_DIRECTION = new THREE.Vector3();
 const IK_INVERSE = new THREE.Quaternion();
 
-function taperedGeometry(
-  shoulderWidth,
-  waistWidth,
-  height,
-  depth,
-  bevel = 0.025,
+function loftedBodyGeometry(
+  rings,
+  {
+    radialSegments = 16,
+    contour = 0.035,
+  } = {},
 ) {
+  const ringSize = radialSegments + 1;
+  const vertexCount = rings.length * ringSize + 2;
+  const positions = new Float32Array(vertexCount * 3);
+  const uvs = new Float32Array(vertexCount * 2);
+  const indices = [];
+  let vertex = 0;
+
+  for (let ringIndex = 0; ringIndex < rings.length; ringIndex += 1) {
+    const [y, halfWidth, halfDepth, offsetX = 0, offsetZ = 0] = rings[ringIndex];
+    const v = ringIndex / Math.max(1, rings.length - 1);
+    for (let segment = 0; segment <= radialSegments; segment += 1) {
+      const u = segment / radialSegments;
+      const angle = u * Math.PI * 2;
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const faceting = 1 + Math.cos(angle * 4) * contour;
+      const frontShape = sine < 0 ? 1.055 : 0.965;
+      const offset = vertex * 3;
+      positions[offset] = offsetX + cosine * halfWidth * faceting;
+      positions[offset + 1] = y;
+      positions[offset + 2] =
+        offsetZ + sine * halfDepth * frontShape * (2 - faceting);
+      uvs[vertex * 2] = u;
+      uvs[vertex * 2 + 1] = v;
+      vertex += 1;
+    }
+  }
+
+  for (let ring = 0; ring < rings.length - 1; ring += 1) {
+    for (let segment = 0; segment < radialSegments; segment += 1) {
+      const a = ring * ringSize + segment;
+      const b = a + ringSize;
+      indices.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  }
+
+  const bottomCenter = vertex;
+  const bottom = rings[0];
+  positions[vertex * 3] = bottom[3] ?? 0;
+  positions[vertex * 3 + 1] = bottom[0];
+  positions[vertex * 3 + 2] = bottom[4] ?? 0;
+  uvs[vertex * 2] = 0.5;
+  uvs[vertex * 2 + 1] = 0.5;
+  vertex += 1;
+  const topCenter = vertex;
+  const top = rings.at(-1);
+  positions[vertex * 3] = top[3] ?? 0;
+  positions[vertex * 3 + 1] = top[0];
+  positions[vertex * 3 + 2] = top[4] ?? 0;
+  uvs[vertex * 2] = 0.5;
+  uvs[vertex * 2 + 1] = 0.5;
+
+  const topRing = (rings.length - 1) * ringSize;
+  for (let segment = 0; segment < radialSegments; segment += 1) {
+    indices.push(bottomCenter, segment + 1, segment);
+    indices.push(topCenter, topRing + segment, topRing + segment + 1);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function footLoftGeometry(sections, radialSegments = 12) {
+  const ringSize = radialSegments + 1;
+  const vertexCount = sections.length * ringSize + 2;
+  const positions = new Float32Array(vertexCount * 3);
+  const uvs = new Float32Array(vertexCount * 2);
+  const indices = [];
+  let vertex = 0;
+
+  for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
+    const [z, centerY, halfWidth, halfHeight] = sections[sectionIndex];
+    const v = sectionIndex / Math.max(1, sections.length - 1);
+    for (let segment = 0; segment <= radialSegments; segment += 1) {
+      const u = segment / radialSegments;
+      const angle = u * Math.PI * 2;
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const offset = vertex * 3;
+      positions[offset] = cosine * halfWidth;
+      positions[offset + 1] = centerY + sine * halfHeight;
+      positions[offset + 2] = z;
+      uvs[vertex * 2] = u;
+      uvs[vertex * 2 + 1] = v;
+      vertex += 1;
+    }
+  }
+
+  for (let section = 0; section < sections.length - 1; section += 1) {
+    for (let segment = 0; segment < radialSegments; segment += 1) {
+      const a = section * ringSize + segment;
+      const b = a + ringSize;
+      indices.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  }
+
+  const heelCenter = vertex;
+  const heel = sections[0];
+  positions[vertex * 3 + 1] = heel[1];
+  positions[vertex * 3 + 2] = heel[0];
+  uvs[vertex * 2] = 0.5;
+  uvs[vertex * 2 + 1] = 0.5;
+  vertex += 1;
+  const toeCenter = vertex;
+  const toe = sections.at(-1);
+  positions[vertex * 3 + 1] = toe[1];
+  positions[vertex * 3 + 2] = toe[0];
+  uvs[vertex * 2] = 0.5;
+  uvs[vertex * 2 + 1] = 0.5;
+
+  const toeRing = (sections.length - 1) * ringSize;
+  for (let segment = 0; segment < radialSegments; segment += 1) {
+    indices.push(heelCenter, segment, segment + 1);
+    indices.push(toeCenter, toeRing + segment + 1, toeRing + segment);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function sideProfileGeometry(points, width, bevel = 0.008, holes = []) {
   const shape = new THREE.Shape();
-  shape.moveTo(-waistWidth * 0.5, -height * 0.5);
-  shape.lineTo(waistWidth * 0.5, -height * 0.5);
-  shape.lineTo(shoulderWidth * 0.5, height * 0.32);
-  shape.lineTo(shoulderWidth * 0.42, height * 0.5);
-  shape.lineTo(-shoulderWidth * 0.42, height * 0.5);
-  shape.lineTo(-shoulderWidth * 0.5, height * 0.32);
+  points.forEach(([z, y], index) => {
+    if (index === 0) shape.moveTo(-z, y);
+    else shape.lineTo(-z, y);
+  });
   shape.closePath();
+  for (const holePoints of holes) {
+    const hole = new THREE.Path();
+    holePoints.forEach(([z, y], index) => {
+      if (index === 0) hole.moveTo(-z, y);
+      else hole.lineTo(-z, y);
+    });
+    hole.closePath();
+    shape.holes.push(hole);
+  }
   const geometry = new THREE.ExtrudeGeometry(shape, {
-    depth,
+    depth: width,
     steps: 1,
     bevelEnabled: true,
     bevelSegments: 2,
@@ -38,8 +176,10 @@ function taperedGeometry(
     bevelThickness: bevel,
     curveSegments: 2,
   });
-  geometry.translate(0, 0, -depth * 0.5);
+  geometry.rotateY(Math.PI * 0.5);
+  geometry.translate(-width * 0.5, 0, 0);
   geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
   return geometry;
 }
 
@@ -154,7 +294,11 @@ function solveTwoBoneArm(arm, target, side) {
     distance * distance
   ) / (2 * distance);
   const bendHeight = Math.sqrt(Math.max(0.0001, upperLength * upperLength - along * along));
-  IK_BEND.set(side * 0.72, -1, 0.16);
+  IK_BEND.set(
+    side * (arm.bendOut ?? 0.72),
+    arm.bendDown ?? -1,
+    arm.bendForward ?? 0.16,
+  );
   IK_BEND.addScaledVector(IK_DIRECTION, -IK_BEND.dot(IK_DIRECTION));
   if (IK_BEND.lengthSq() < 0.001) IK_BEND.set(side, 0, 0);
   else IK_BEND.normalize();
@@ -311,88 +455,200 @@ export function createEnemySharedAssets() {
   };
 
   const geometries = {
-    torso: taperedGeometry(0.51, 0.38, 0.64, 0.25, 0.022),
-    vest: taperedGeometry(0.55, 0.43, 0.49, 0.32, 0.018),
-    pelvis: new RoundedBoxGeometry(0.39, 0.25, 0.25, 3, 0.06),
-    pouch: new RoundedBoxGeometry(0.14, 0.17, 0.09, 2, 0.025),
+    torso: loftedBodyGeometry([
+      [-0.31, 0.18, 0.11, 0, 0.012],
+      [-0.24, 0.205, 0.125],
+      [-0.07, 0.225, 0.137],
+      [0.13, 0.252, 0.145],
+      [0.265, 0.265, 0.132],
+      [0.31, 0.205, 0.105],
+    ], { radialSegments: 18, contour: 0.028 }),
+    vest: loftedBodyGeometry([
+      [-0.235, 0.195, 0.145, 0, -0.008],
+      [-0.17, 0.222, 0.16, 0, -0.012],
+      [0.06, 0.255, 0.174, 0, -0.016],
+      [0.225, 0.265, 0.158, 0, -0.006],
+      [0.255, 0.205, 0.125],
+    ], { radialSegments: 16, contour: 0.045 }),
+    pelvis: loftedBodyGeometry([
+      [-0.14, 0.15, 0.105],
+      [-0.08, 0.205, 0.14],
+      [0.055, 0.215, 0.145],
+      [0.14, 0.178, 0.115],
+    ], { radialSegments: 16, contour: 0.025 }),
+    pouch: loftedBodyGeometry([
+      [-0.085, 0.052, 0.038],
+      [-0.058, 0.073, 0.052],
+      [0.055, 0.073, 0.052],
+      [0.085, 0.056, 0.04],
+    ], { radialSegments: 12, contour: 0.03 }),
     pack: new RoundedBoxGeometry(0.38, 0.43, 0.16, 3, 0.045),
-    limbUpper: clothLimbGeometry(0.39, 0.098, 0.073, {
-      depthScale: 0.88,
-      fold: 0.052,
-      seam: 0.06,
-    }),
-    limbLower: clothLimbGeometry(0.35, 0.079, 0.057, {
+    limbUpper: clothLimbGeometry(0.385, 0.108, 0.078, {
+      radialSegments: 12,
       depthScale: 0.86,
-      fold: 0.06,
-      seam: 0.065,
+      fold: 0.046,
+      seam: 0.048,
     }),
-    legUpper: clothLimbGeometry(0.45, 0.119, 0.09, {
+    limbLower: clothLimbGeometry(0.35, 0.087, 0.061, {
       radialSegments: 12,
       depthScale: 0.84,
-      fold: 0.07,
-      seam: 0.072,
+      fold: 0.052,
+      seam: 0.052,
     }),
-    legLower: clothLimbGeometry(0.41, 0.094, 0.066, {
-      radialSegments: 12,
+    legUpper: clothLimbGeometry(0.445, 0.132, 0.101, {
+      radialSegments: 14,
       depthScale: 0.82,
-      fold: 0.065,
-      seam: 0.075,
+      fold: 0.055,
+      seam: 0.058,
     }),
-    hand: new RoundedBoxGeometry(0.11, 0.12, 0.082, 2, 0.025),
-    finger: new THREE.CapsuleGeometry(0.012, 0.052, 3, 6),
-    thumb: new THREE.CapsuleGeometry(0.015, 0.055, 3, 6),
+    legLower: clothLimbGeometry(0.405, 0.103, 0.073, {
+      radialSegments: 14,
+      depthScale: 0.8,
+      fold: 0.05,
+      seam: 0.058,
+    }),
+    hand: new RoundedBoxGeometry(0.115, 0.115, 0.078, 3, 0.027),
+    finger: new THREE.CapsuleGeometry(0.013, 0.043, 3, 7),
+    fingerTip: new THREE.CapsuleGeometry(0.0115, 0.032, 3, 7),
+    thumb: new THREE.CapsuleGeometry(0.016, 0.052, 3, 7),
+    knucklePlate: new RoundedBoxGeometry(0.092, 0.025, 0.064, 2, 0.009),
     head: radialProfileGeometry([
-      [0, 0.17],
-      [0.09, 0.155],
-      [0.132, 0.105],
-      [0.148, 0.035],
-      [0.142, -0.045],
-      [0.125, -0.105],
-      [0.09, -0.155],
-      [0.035, -0.178],
-      [0, -0.18],
-    ], 20, 0.88),
-    neck: new THREE.CylinderGeometry(0.07, 0.08, 0.13, 10),
+      [0, 0.155],
+      [0.077, 0.145],
+      [0.12, 0.102],
+      [0.134, 0.035],
+      [0.129, -0.045],
+      [0.112, -0.105],
+      [0.078, -0.145],
+      [0.028, -0.162],
+      [0, -0.164],
+    ], 22, 0.84),
+    neck: loftedBodyGeometry([
+      [-0.085, 0.067, 0.061],
+      [0.025, 0.071, 0.065],
+      [0.085, 0.062, 0.058],
+    ], { radialSegments: 12, contour: 0.01 }),
     helmet: radialProfileGeometry([
-      [0.176, -0.035],
-      [0.18, 0.015],
-      [0.172, 0.085],
-      [0.145, 0.145],
-      [0.09, 0.19],
-      [0.03, 0.208],
-      [0, 0.212],
-    ], 22, 0.96),
-    helmetRim: new THREE.CylinderGeometry(0.175, 0.175, 0.035, 16),
-    helmetMount: new RoundedBoxGeometry(0.07, 0.07, 0.035, 2, 0.01),
-    helmetRail: new RoundedBoxGeometry(0.045, 0.08, 0.13, 2, 0.012),
-    faceMask: new RoundedBoxGeometry(0.225, 0.105, 0.07, 3, 0.025),
-    goggleFrame: new RoundedBoxGeometry(0.235, 0.078, 0.05, 3, 0.022),
-    goggleLens: new RoundedBoxGeometry(0.084, 0.043, 0.012, 2, 0.008),
-    collar: new RoundedBoxGeometry(0.19, 0.1, 0.2, 2, 0.025),
-    belt: new RoundedBoxGeometry(0.42, 0.075, 0.27, 2, 0.018),
-    shoulderPad: new RoundedBoxGeometry(0.15, 0.105, 0.18, 3, 0.035),
+      [0.154, -0.022],
+      [0.158, 0.018],
+      [0.15, 0.078],
+      [0.128, 0.132],
+      [0.08, 0.173],
+      [0.025, 0.19],
+      [0, 0.192],
+    ], 22, 0.91),
+    helmetRim: loftedBodyGeometry([
+      [-0.017, 0.158, 0.143],
+      [0.017, 0.158, 0.143],
+    ], { radialSegments: 18, contour: 0.015 }),
+    helmetMount: new RoundedBoxGeometry(0.062, 0.062, 0.03, 2, 0.009),
+    helmetRail: new RoundedBoxGeometry(0.039, 0.07, 0.115, 2, 0.011),
+    faceMask: new RoundedBoxGeometry(0.2, 0.092, 0.06, 3, 0.022),
+    goggleFrame: new RoundedBoxGeometry(0.21, 0.069, 0.044, 3, 0.019),
+    goggleLens: new RoundedBoxGeometry(0.074, 0.038, 0.011, 2, 0.007),
+    collar: loftedBodyGeometry([
+      [-0.055, 0.105, 0.095],
+      [0.035, 0.125, 0.105],
+      [0.065, 0.09, 0.082],
+    ], { radialSegments: 12, contour: 0.025 }),
+    belt: loftedBodyGeometry([
+      [-0.038, 0.205, 0.135],
+      [0.038, 0.205, 0.135],
+    ], { radialSegments: 14, contour: 0.02 }),
+    shoulderPad: loftedBodyGeometry([
+      [-0.065, 0.065, 0.078],
+      [0.015, 0.083, 0.098],
+      [0.065, 0.06, 0.075],
+    ], { radialSegments: 12, contour: 0.025 }),
     elbowPad: new RoundedBoxGeometry(0.12, 0.13, 0.055, 2, 0.025),
     cuff: new RoundedBoxGeometry(0.12, 0.075, 0.11, 2, 0.02),
     thighPocket: new RoundedBoxGeometry(0.13, 0.18, 0.07, 2, 0.02),
-    boot: new RoundedBoxGeometry(0.165, 0.19, 0.31, 3, 0.04),
-    bootSole: new RoundedBoxGeometry(0.178, 0.045, 0.345, 2, 0.014),
-    bootToe: new RoundedBoxGeometry(0.17, 0.09, 0.16, 2, 0.03),
+    boot: footLoftGeometry([
+      [0.105, 0.13, 0.069, 0.115],
+      [0.025, 0.12, 0.082, 0.108],
+      [-0.075, 0.088, 0.09, 0.073],
+      [-0.18, 0.063, 0.092, 0.051],
+      [-0.235, 0.055, 0.075, 0.041],
+    ], 14),
+    bootSole: footLoftGeometry([
+      [0.115, 0.03, 0.076, 0.025],
+      [0.015, 0.029, 0.09, 0.024],
+      [-0.09, 0.027, 0.098, 0.023],
+      [-0.19, 0.026, 0.101, 0.022],
+      [-0.245, 0.029, 0.082, 0.025],
+    ], 12),
     kneepad: new RoundedBoxGeometry(0.13, 0.15, 0.055, 2, 0.025),
-    rifleReceiver: new RoundedBoxGeometry(0.12, 0.16, 0.43, 3, 0.024),
-    rifleHandguard: new RoundedBoxGeometry(0.105, 0.12, 0.38, 2, 0.02),
-    rifleStock: new RoundedBoxGeometry(0.13, 0.18, 0.3, 3, 0.035),
-    rifleGrip: new RoundedBoxGeometry(0.09, 0.2, 0.105, 2, 0.02),
-    rifleMag: new RoundedBoxGeometry(0.105, 0.28, 0.14, 2, 0.025),
-    barrel: new THREE.CylinderGeometry(0.025, 0.025, 0.48, 10),
-    muzzle: new THREE.CylinderGeometry(0.043, 0.035, 0.12, 10),
-    optic: new RoundedBoxGeometry(0.09, 0.1, 0.17, 2, 0.02),
+    rifleReceiver: sideProfileGeometry([
+      [-0.23, 0.06],
+      [0.17, 0.072],
+      [0.23, 0.034],
+      [0.2, -0.044],
+      [0.075, -0.068],
+      [-0.19, -0.057],
+    ], 0.105, 0.007),
+    rifleHandguard: sideProfileGeometry([
+      [-0.2, 0.045],
+      [0.17, 0.056],
+      [0.205, 0.022],
+      [0.17, -0.052],
+      [-0.18, -0.047],
+      [-0.22, -0.015],
+    ], 0.092, 0.006),
+    rifleStock: sideProfileGeometry(
+      [
+        [-0.16, 0.038],
+        [0.125, 0.06],
+        [0.17, 0.024],
+        [0.15, -0.085],
+        [0.055, -0.092],
+        [-0.02, -0.038],
+        [-0.15, -0.024],
+      ],
+      0.105,
+      0.009,
+      [[
+        [-0.065, 0.012],
+        [0.075, 0.032],
+        [0.11, 0.005],
+        [0.075, -0.052],
+        [0.02, -0.054],
+        [-0.045, -0.018],
+      ]],
+    ),
+    rifleGrip: sideProfileGeometry([
+      [-0.052, 0.058],
+      [0.052, 0.04],
+      [0.038, -0.102],
+      [-0.006, -0.125],
+      [-0.055, -0.103],
+    ], 0.074, 0.006),
+    rifleMag: sideProfileGeometry([
+      [-0.06, 0.13],
+      [0.055, 0.112],
+      [0.067, -0.093],
+      [0.014, -0.15],
+      [-0.055, -0.128],
+      [-0.075, -0.018],
+    ], 0.094, 0.007),
+    barrel: new THREE.CylinderGeometry(0.021, 0.021, 0.46, 12),
+    muzzle: new THREE.CylinderGeometry(0.036, 0.029, 0.105, 12),
+    optic: sideProfileGeometry([
+      [-0.08, -0.043],
+      [0.08, -0.043],
+      [0.072, 0.036],
+      [0.035, 0.06],
+      [-0.048, 0.058],
+      [-0.082, 0.022],
+    ], 0.073, 0.006),
     opticLens: new THREE.CylinderGeometry(0.037, 0.037, 0.006, 12),
-    rail: new RoundedBoxGeometry(0.095, 0.025, 0.5, 2, 0.008),
+    rail: new RoundedBoxGeometry(0.087, 0.019, 0.49, 2, 0.006),
+    rifleCheek: new RoundedBoxGeometry(0.096, 0.031, 0.2, 2, 0.007),
+    rifleGasBlock: new RoundedBoxGeometry(0.075, 0.075, 0.052, 2, 0.011),
     earpiece: new THREE.CylinderGeometry(0.04, 0.04, 0.025, 10),
     antenna: new THREE.CylinderGeometry(0.008, 0.008, 0.24, 6),
     rifleControl: new THREE.CylinderGeometry(0.014, 0.014, 0.025, 8),
     magazineBase: new RoundedBoxGeometry(0.115, 0.025, 0.15, 2, 0.007),
-    rifleVent: new THREE.BoxGeometry(0.125, 0.012, 0.035),
+    rifleVent: new RoundedBoxGeometry(0.11, 0.01, 0.031, 1, 0.003),
   };
 
   const ownedMaterials = [
@@ -426,17 +682,19 @@ function createRifle(assets, enemyId) {
 
   const weaponGeometry = mergeGeometryParts([
     { geometry: geometry.rifleReceiver },
-    { geometry: geometry.rifleHandguard, position: [0, 0, -0.38] },
-    { geometry: geometry.rifleStock, position: [0, -0.005, 0.35] },
+    { geometry: geometry.rifleHandguard, position: [0, 0, -0.31] },
+    { geometry: geometry.rifleStock, position: [0, -0.005, 0.28] },
     { geometry: geometry.rifleGrip, position: [0, -0.145, 0.1], rotation: [-0.18, 0, 0] },
     { geometry: geometry.magazineBase, position: [0, -0.35, -0.02], rotation: [-0.14, 0, 0] },
     { geometry: geometry.optic, position: [0, 0.16, -0.08] },
   ]);
   const edgeParts = [
     { geometry: geometry.rifleMag, position: [0, -0.21, -0.04], rotation: [-0.14, 0, 0] },
-    { geometry: geometry.barrel, position: [0, 0, -0.74], rotation: [Math.PI / 2, 0, 0] },
-    { geometry: geometry.muzzle, position: [0, 0, -1.03], rotation: [Math.PI / 2, 0, 0] },
-    { geometry: geometry.rail, position: [0, 0.095, -0.2] },
+    { geometry: geometry.barrel, position: [0, 0, -0.64], rotation: [Math.PI / 2, 0, 0] },
+    { geometry: geometry.muzzle, position: [0, 0, -0.915], rotation: [Math.PI / 2, 0, 0] },
+    { geometry: geometry.rail, position: [0, 0.092, -0.14] },
+    { geometry: geometry.rifleCheek, position: [0, 0.075, 0.285] },
+    { geometry: geometry.rifleGasBlock, position: [0, 0.012, -0.48] },
     {
       geometry: geometry.magazineBase,
       position: [0, 0.075, 0.09],
@@ -446,7 +704,7 @@ function createRifle(assets, enemyId) {
   for (let i = 0; i < 5; i += 1) {
     edgeParts.push({
       geometry: geometry.rifleVent,
-      position: [0, 0.066, -0.25 - i * 0.072],
+      position: [0, 0.06, -0.18 - i * 0.052],
     });
   }
   const edgeGeometry = mergeGeometryParts(edgeParts);
@@ -478,7 +736,7 @@ function createRifle(assets, enemyId) {
   ];
 
   rifle.userData.muzzle = new THREE.Object3D();
-  rifle.userData.muzzle.position.set(0, 0, -1.1);
+  rifle.userData.muzzle.position.set(0, 0, -0.98);
   rifle.add(rifle.userData.muzzle);
   markHitZone(rifle, enemyId, 'weapon');
   return rifle;
@@ -494,11 +752,11 @@ export function createEnemySoldier(id, visualVariant, assets) {
   root.userData.enemyRoot = true;
 
   const pelvis = mesh(geometry.pelvis, palette.clothDark, 'pelvis');
-  pelvis.position.y = 0.99;
+  pelvis.position.y = 0.91;
   root.add(pelvis);
 
   const torsoPivot = new THREE.Group();
-  torsoPivot.position.y = 1.32;
+  torsoPivot.position.y = 1.22;
   root.add(torsoPivot);
   const torso = mesh(geometry.torso, palette.cloth, 'combat-shirt');
   const vest = mesh(geometry.vest, palette.armour, 'layered-armour-vest');
@@ -507,51 +765,51 @@ export function createEnemySoldier(id, visualVariant, assets) {
   markHitZone(torsoPivot, id, 'torso');
 
   const collar = mesh(geometry.collar, palette.clothDark, 'raised-combat-collar');
-  collar.position.set(0, 0.315, -0.005);
+  collar.position.set(0, 0.315, 0.005);
   const belt = mesh(geometry.belt, palette.accent, 'load-bearing-belt');
-  belt.position.set(0, -0.31, 0.005);
+  belt.position.set(0, -0.295, 0.005);
   const beltBuckle = mesh(geometry.rifleControl, materials.buckle, 'belt-buckle');
   beltBuckle.rotation.z = Math.PI / 2;
   beltBuckle.scale.set(1.45, 1.4, 1.45);
-  beltBuckle.position.set(0, -0.31, -0.15);
+  beltBuckle.position.set(0, -0.295, -0.142);
   torsoPivot.add(collar, belt, beltBuckle);
 
   const neck = mesh(geometry.neck, materials.skin, 'neck');
-  neck.position.y = 0.37;
+  neck.position.y = 0.385;
   torsoPivot.add(neck);
 
   const headPivot = new THREE.Group();
-  headPivot.position.y = 0.5;
+  headPivot.position.y = 0.485;
   torsoPivot.add(headPivot);
   const head = mesh(geometry.head, materials.skin, 'head');
-  head.scale.set(0.92, 1.06, 0.94);
+  head.scale.set(0.96, 1.02, 0.96);
   const helmet = mesh(geometry.helmet, palette.armour, 'helmet-shell');
-  helmet.position.y = 0.045;
+  helmet.position.y = 0.025;
   helmet.rotation.x = -0.04;
   const helmetRim = mesh(geometry.helmetRim, palette.armour, 'helmet-rim');
-  helmetRim.position.set(0, -0.003, -0.015);
+  helmetRim.position.set(0, -0.004, -0.01);
   const earpiece = mesh(geometry.earpiece, materials.weapon, 'communications-earpiece');
   earpiece.rotation.z = Math.PI / 2;
-  earpiece.position.set(-0.155, -0.01, 0);
+  earpiece.position.set(-0.137, -0.008, 0);
   const antenna = mesh(geometry.antenna, materials.weaponEdge, 'radio-antenna');
-  antenna.position.set(-0.145, 0.13, 0.04);
+  antenna.position.set(-0.128, 0.12, 0.04);
   antenna.rotation.z = -0.13;
   const faceMask = mesh(geometry.faceMask, palette.clothDark, 'protective-face-wrap');
-  faceMask.position.set(0, -0.055, -0.12);
+  faceMask.position.set(0, -0.058, -0.106);
   faceMask.rotation.x = -0.06;
   const goggleFrame = mesh(geometry.goggleFrame, materials.glove, 'ballistic-goggle-frame');
-  goggleFrame.position.set(0, 0.038, -0.132);
+  goggleFrame.position.set(0, 0.034, -0.118);
   const leftLens = mesh(geometry.goggleLens, materials.lens, 'left-goggle-lens', false);
-  leftLens.position.set(-0.056, 0.041, -0.161);
+  leftLens.position.set(-0.05, 0.037, -0.141);
   const rightLens = mesh(geometry.goggleLens, materials.lens, 'right-goggle-lens', false);
-  rightLens.position.set(0.056, 0.041, -0.161);
+  rightLens.position.set(0.05, 0.037, -0.141);
   const helmetMount = mesh(geometry.helmetMount, materials.weaponEdge, 'helmet-front-mount');
-  helmetMount.position.set(0, 0.14, -0.112);
+  helmetMount.position.set(0, 0.13, -0.101);
   helmetMount.rotation.x = -0.3;
   const helmetRailLeft = mesh(geometry.helmetRail, materials.weapon, 'left-helmet-rail');
-  helmetRailLeft.position.set(-0.15, 0.055, -0.01);
+  helmetRailLeft.position.set(-0.135, 0.052, -0.005);
   const helmetRailRight = mesh(geometry.helmetRail, materials.weapon, 'right-helmet-rail');
-  helmetRailRight.position.set(0.15, 0.055, -0.01);
+  helmetRailRight.position.set(0.135, 0.052, -0.005);
   headPivot.add(
     head,
     faceMask,
@@ -574,10 +832,10 @@ export function createEnemySoldier(id, visualVariant, assets) {
   markHitZone(pack, id, 'torso');
 
   const pouches = [];
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 3; i += 1) {
     const pouch = mesh(geometry.pouch, palette.accent, `magazine-pouch-${i}`);
-    pouch.position.set((i - 1.5) * 0.12, -0.11, -0.19);
-    pouch.rotation.x = -0.05;
+    pouch.position.set((i - 1) * 0.13 - 0.012, -0.12 + i * 0.006, -0.19);
+    pouch.rotation.set(-0.05, 0, (i - 1) * 0.025);
     torsoPivot.add(pouch);
     pouches.push(pouch);
   }
@@ -601,31 +859,28 @@ export function createEnemySoldier(id, visualVariant, assets) {
   function makeLeg(side) {
     const upperPivot = new THREE.Group();
     upperPivot.name = side < 0 ? 'left-leg' : 'right-leg';
-    upperPivot.position.set(side * 0.135, 0.93, 0);
+    upperPivot.position.set(side * 0.125, 0.9, 0);
     root.add(upperPivot);
     const upper = mesh(geometry.legUpper, palette.cloth, 'tailored-trouser-thigh');
-    upper.position.y = -0.215;
+    upper.position.y = -0.212;
     upperPivot.add(upper);
 
     const knee = new THREE.Group();
-    knee.position.y = -0.43;
+    knee.position.y = -0.425;
     upperPivot.add(knee);
     const lower = mesh(geometry.legLower, palette.clothDark, 'reinforced-trouser-shin');
-    lower.position.y = -0.2;
+    lower.position.y = -0.197;
     knee.add(lower);
     const kneepad = mesh(geometry.kneepad, palette.armour, 'kneepad');
     kneepad.position.set(0, 0.02, -0.075);
     knee.add(kneepad);
 
     const boot = mesh(geometry.boot, materials.boot, 'tactical-boot');
-    boot.position.set(0, -0.42, -0.07);
+    boot.position.set(0, -0.475, 0);
     knee.add(boot);
     const bootSole = mesh(geometry.bootSole, materials.weapon, 'treaded-boot-sole');
-    bootSole.position.set(0, -0.49, -0.07);
+    bootSole.position.set(0, -0.465, 0);
     knee.add(bootSole);
-    const bootToe = mesh(geometry.bootToe, materials.boot, 'reinforced-boot-toe');
-    bootToe.position.set(0, -0.425, -0.165);
-    knee.add(bootToe);
     const thighPocket = mesh(geometry.thighPocket, palette.accent, 'cargo-thigh-pocket');
     thighPocket.position.set(side * 0.09, -0.17, side === (visualVariant % 2 ? -1 : 1) ? -0.07 : 0.025);
     thighPocket.rotation.z = -side * 0.08;
@@ -637,16 +892,16 @@ export function createEnemySoldier(id, visualVariant, assets) {
   function makeArm(side) {
     const shoulder = new THREE.Group();
     shoulder.name = side < 0 ? 'left-arm' : 'right-arm';
-    shoulder.position.set(side * 0.29, 0.22, -0.02);
+    shoulder.position.set(side * 0.265, 0.225, -0.005);
     torsoPivot.add(shoulder);
     const upper = mesh(geometry.limbUpper, palette.cloth, 'tailored-upper-arm');
-    upper.position.y = -0.18;
+    upper.position.y = -0.187;
     shoulder.add(upper);
     const shoulderPad = mesh(geometry.shoulderPad, palette.armour, 'layered-shoulder-pad');
-    shoulderPad.position.set(side * 0.015, -0.045, 0);
+    shoulderPad.position.set(side * 0.025, -0.05, -0.005);
     shoulder.add(shoulderPad);
     const elbow = new THREE.Group();
-    elbow.position.y = -0.36;
+    elbow.position.y = -0.37;
     shoulder.add(elbow);
     const lower = mesh(geometry.limbLower, palette.clothDark, 'reinforced-forearm');
     lower.position.y = -0.17;
@@ -659,14 +914,19 @@ export function createEnemySoldier(id, visualVariant, assets) {
     elbow.add(cuff);
     const hand = new THREE.Group();
     hand.name = 'articulated-gloved-hand';
-    hand.position.y = -0.34;
+    hand.position.y = -0.35;
     elbow.add(hand);
     const handParts = [{ geometry: geometry.hand }];
-    for (let fingerIndex = 0; fingerIndex < 3; fingerIndex += 1) {
+    for (let fingerIndex = 0; fingerIndex < 4; fingerIndex += 1) {
       handParts.push({
         geometry: geometry.finger,
-        position: [(fingerIndex - 1) * 0.027, -0.052, -0.028],
-        rotation: [0.7, 0, 0],
+        position: [(fingerIndex - 1.5) * 0.023, -0.038, -0.027],
+        rotation: [0.82, 0, 0],
+      });
+      handParts.push({
+        geometry: geometry.fingerTip,
+        position: [(fingerIndex - 1.5) * 0.023, -0.068, -0.058],
+        rotation: [1.28, 0, 0],
       });
     }
     handParts.push({
@@ -677,14 +937,25 @@ export function createEnemySoldier(id, visualVariant, assets) {
     const handGeometry = mergeGeometryParts(handParts);
     characterOwnedGeometries.push(handGeometry);
     hand.add(mesh(handGeometry, materials.glove, 'articulated-glove'));
+    const knucklePlate = mesh(
+      geometry.knucklePlate,
+      palette.armour,
+      'segmented-knuckle-guard',
+    );
+    knucklePlate.position.set(0, 0.012, -0.052);
+    knucklePlate.rotation.x = -0.1;
+    hand.add(knucklePlate);
     markHitZone(shoulder, id, 'arm');
     return {
       shoulder,
       elbow,
       hand,
-      upperLength: 0.36,
-      lowerLength: 0.34,
+      upperLength: 0.37,
+      lowerLength: 0.35,
       side,
+      bendOut: side < 0 ? 0.92 : 0.38,
+      bendDown: side < 0 ? -0.62 : -0.92,
+      bendForward: side < 0 ? 0.08 : 0.24,
     };
   }
 
@@ -694,8 +965,9 @@ export function createEnemySoldier(id, visualVariant, assets) {
   const rightArm = makeArm(1);
 
   const rifle = createRifle(assets, id);
-  rifle.position.set(0.035, 0.05, -0.25);
-  rifle.rotation.set(-0.12, -0.025, 0);
+  rifle.position.set(0.055, 0.08, -0.205);
+  rifle.rotation.set(-0.1, -0.045, -0.012);
+  rifle.scale.setScalar(0.84);
   torsoPivot.add(rifle);
 
   const contactShadowMaterial = new THREE.MeshBasicMaterial({
@@ -759,6 +1031,9 @@ export function createEnemySoldier(id, visualVariant, assets) {
 
       if (this.death > 0.02) {
         const fall = this.death;
+        pelvis.rotation.x = fall * 0.18;
+        pelvis.rotation.y = fall * this.deathSide * 0.18;
+        pelvis.rotation.z = fall * this.deathSide * 0.22;
         torsoPivot.rotation.x = -0.08 - fall * 0.72;
         torsoPivot.rotation.z = fall * (0.28 + this.deathSide * 0.94);
         headPivot.rotation.x = fall * 0.32;
@@ -775,39 +1050,67 @@ export function createEnemySoldier(id, visualVariant, assets) {
       const gait = Math.sin(this.stride);
       const gaitOpposite = Math.sin(this.stride + Math.PI);
       const walkSwing = motion * 0.58;
-      leftLeg.upperPivot.rotation.x = 0.025 + gait * walkSwing;
-      rightLeg.upperPivot.rotation.x = 0.025 + gaitOpposite * walkSwing;
-      leftLeg.upperPivot.rotation.y = 0.045;
-      rightLeg.upperPivot.rotation.y = -0.045;
-      leftLeg.upperPivot.rotation.z = -0.022;
-      rightLeg.upperPivot.rotation.z = 0.022;
-      leftLeg.knee.rotation.x = 0.055 + Math.max(0, -gait) * motion * 0.52;
-      rightLeg.knee.rotation.x = 0.055 + Math.max(0, -gaitOpposite) * motion * 0.52;
-
       const aimRaise = this.aimWeight;
       const breathing = Math.sin(this.stride * 0.31) * (1 - motion * 0.65);
-      torsoPivot.position.y = 1.32 + breathing * 0.004;
-      torsoPivot.rotation.x = -aimRaise * 0.08 + this.hit * 0.11 + breathing * 0.008;
-      torsoPivot.rotation.y = breathing * (1 - aimRaise) * 0.014;
-      torsoPivot.rotation.z = this.hit * 0.13 + gait * motion * 0.014;
-      headPivot.position.y = 0.5 + breathing * 0.002;
-      headPivot.rotation.x = aimRaise * 0.04;
-      headPivot.rotation.y = Math.sin(this.stride * 0.23) * (1 - aimRaise) * 0.08;
-      rifle.position.x = 0.035 + this.hit * 0.012;
-      rifle.position.y = 0.05 + aimRaise * 0.1;
-      rifle.position.z = -0.25 - aimRaise * 0.035 + this.recoil * 0.075;
-      rifle.rotation.x = -0.12 + aimRaise * 0.1 + this.recoil * 0.065;
-      rifle.rotation.y = -0.025;
-      rifle.rotation.z = -0.015 + gait * motion * 0.012;
+
+      // A staggered, weight-bearing firing stance keeps the soldier from
+      // presenting as a symmetrical museum mannequin in alert captures.
+      leftLeg.upperPivot.position.set(-0.125, 0.9, -0.035 * aimRaise);
+      rightLeg.upperPivot.position.set(0.125, 0.9, 0.052 * aimRaise);
+      leftLeg.upperPivot.rotation.x =
+        0.02 + gait * walkSwing + aimRaise * 0.085;
+      rightLeg.upperPivot.rotation.x =
+        0.02 + gaitOpposite * walkSwing - aimRaise * 0.055;
+      leftLeg.upperPivot.rotation.y = 0.052 + aimRaise * 0.045;
+      rightLeg.upperPivot.rotation.y = -0.045 - aimRaise * 0.07;
+      leftLeg.upperPivot.rotation.z = -0.03 - aimRaise * 0.018;
+      rightLeg.upperPivot.rotation.z = 0.03 + aimRaise * 0.038;
+      leftLeg.knee.rotation.x =
+        0.065 + Math.max(0, -gait) * motion * 0.52 + aimRaise * 0.09;
+      rightLeg.knee.rotation.x =
+        0.075 + Math.max(0, -gaitOpposite) * motion * 0.52 + aimRaise * 0.155;
+
+      pelvis.position.y = 0.91 + breathing * 0.002;
+      pelvis.rotation.x = -aimRaise * 0.025;
+      pelvis.rotation.y = aimRaise * 0.065;
+      pelvis.rotation.z = -aimRaise * 0.018 + gait * motion * 0.012;
+      torsoPivot.position.x = aimRaise * 0.014;
+      torsoPivot.position.y = 1.22 + breathing * 0.004;
+      torsoPivot.position.z = aimRaise * 0.008;
+      torsoPivot.rotation.x =
+        -aimRaise * 0.095 + this.hit * 0.11 + breathing * 0.008;
+      torsoPivot.rotation.y =
+        -aimRaise * 0.105 + breathing * (1 - aimRaise) * 0.014;
+      torsoPivot.rotation.z =
+        -aimRaise * 0.025 + this.hit * 0.13 + gait * motion * 0.014;
+      headPivot.position.y = 0.485 + breathing * 0.002;
+      headPivot.rotation.x = aimRaise * 0.052;
+      headPivot.rotation.y =
+        aimRaise * 0.095 +
+        Math.sin(this.stride * 0.23) * (1 - aimRaise) * 0.08;
+      headPivot.rotation.z = aimRaise * 0.022;
+
+      rifle.position.x = 0.055 + aimRaise * 0.026 + this.hit * 0.012;
+      rifle.position.y = 0.08 + aimRaise * 0.27;
+      rifle.position.z =
+        -0.205 - aimRaise * 0.02 + this.recoil * 0.063;
+      rifle.rotation.x =
+        -0.1 + aimRaise * 0.185 + this.recoil * 0.065;
+      rifle.rotation.y = -0.045 + aimRaise * 0.014;
+      rifle.rotation.z =
+        -0.012 - aimRaise * 0.02 + gait * motion * 0.012;
       rifle.updateMatrix();
 
-      IK_TARGET.set(0.015, -0.15, 0.08).applyMatrix4(rifle.matrix);
+      IK_TARGET.set(0.047, -0.16, 0.085).applyMatrix4(rifle.matrix);
       solveTwoBoneArm(rightArm, IK_TARGET, 1);
-      IK_TARGET.set(-0.015, -0.04, -0.32).applyMatrix4(rifle.matrix);
+      IK_TARGET.set(-0.043, -0.052, -0.335).applyMatrix4(rifle.matrix);
       solveTwoBoneArm(leftArm, IK_TARGET, -1);
+      rightArm.hand.rotation.set(-0.24, 0.13, -0.18);
+      leftArm.hand.rotation.set(-0.78, -0.08, 0.22);
 
       root.position.y = this.lastGroundY + Math.abs(gait) * motion * 0.018;
       contactShadow.position.y = -root.position.y + this.lastGroundY - 0.003;
+      contactShadow.scale.set(1, 1, 1);
     },
     faceDirection(direction, rate, dt) {
       const targetYaw = Math.atan2(-direction.x, -direction.z);

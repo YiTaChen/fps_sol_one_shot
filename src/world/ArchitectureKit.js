@@ -322,6 +322,38 @@ export class ArchitectureKit {
     }
   }
 
+  addProfile(
+    spec,
+    materialId,
+    points,
+    depth,
+    localPosition,
+    options = {},
+  ) {
+    const transform = composeWorldTransform(spec, localPosition, options.localEuler);
+    const geometry = this.geometryKit.profile(
+      points,
+      depth,
+      options.bevel ?? 0.018,
+      options.bevelSegments ?? 2,
+    );
+    this.batcher.add(
+      geometry,
+      materialId,
+      transform.position,
+      transform.quaternion,
+      options.scale ?? _scale.set(1, 1, 1),
+      {
+        name: options.module ?? 'architecture-profile',
+        castShadow: options.castShadow ?? false,
+        receiveShadow: options.receiveShadow ?? true,
+      },
+    );
+    if (options.module) {
+      this.use(options.module);
+    }
+  }
+
   addFacadeSegment(group, spec, family, size, localPosition) {
     this.addInstance(spec, family.wall, size, localPosition, {
       radius: 0.012,
@@ -379,6 +411,29 @@ export class ArchitectureKit {
         _local.set(opening.x, bottomY - frameThickness * 0.5, edgeZ + 0.035),
         { module: 'recessed-window' },
       );
+      if (spec.family === 'marketArcade' && opening.type.includes('window')) {
+        this.addInstance(
+          spec,
+          family.accent,
+          _scale.set(opening.width + 0.34, 0.115, frameDepth + 0.18),
+          _local.set(opening.x, topY + 0.16, edgeZ + 0.065),
+          { module: 'recessed-window', radius: 0.026 },
+        );
+        this.addProfile(
+          spec,
+          family.trim,
+          [
+            [-0.095, -0.12],
+            [0.095, -0.12],
+            [0.13, 0.03],
+            [0, 0.16],
+            [-0.13, 0.03],
+          ],
+          0.18,
+          _local.set(opening.x, topY + 0.19, edgeZ + 0.13),
+          { module: 'recessed-window', bevel: 0.012 },
+        );
+      }
     } else {
       this.addInstance(
         spec,
@@ -650,6 +705,31 @@ export class ArchitectureKit {
       { module: 'parapet' },
     );
 
+    // Side-wall bays and string courses stop even secondary elevations from
+    // reading as a single decorated cuboid. They are intentionally shallow so
+    // they add highlight response without changing collision envelopes.
+    for (const side of [-1, 1]) {
+      const sideX = side * (spec.width * 0.5 + 0.055);
+      for (const z of [-spec.depth * 0.31, 0, spec.depth * 0.31]) {
+        this.addInstance(
+          spec,
+          family.trim,
+          _scale.set(0.16, Math.max(2.2, top * 0.78), 0.28),
+          _local.set(sideX, Math.max(2.2, top * 0.78) * 0.5 + 0.18, z),
+          { module: 'corner-pier', radius: 0.035 },
+        );
+      }
+      for (let floor = 1; floor <= spec.stories; floor += 1) {
+        this.addInstance(
+          spec,
+          family.base,
+          _scale.set(0.18, 0.14, spec.depth * 0.86),
+          _local.set(sideX, Math.min(top + 0.22, floor * FLOOR_HEIGHT + 0.025), 0),
+          { module: 'coping', radius: 0.026 },
+        );
+      }
+    }
+
     switch (spec.family) {
       case 'marketArcade': {
         const awningY = 2.72;
@@ -688,6 +768,26 @@ export class ArchitectureKit {
           _local.set(0, FLOOR_HEIGHT + 0.03, front + 0.15),
           { module: 'coping' },
         );
+        this.addInstance(
+          spec,
+          'wood',
+          _scale.set(spec.width * 0.94, 0.12, 0.34),
+          _local.set(0, FLOOR_HEIGHT + 0.19, front + 0.21),
+          { module: 'coping', radius: 0.032 },
+        );
+        for (const x of [-spec.width * 0.28, 0, spec.width * 0.28]) {
+          this.addInstance(
+            spec,
+            'concreteAggregate',
+            _scale.set(0.22, Math.max(1.8, top - FLOOR_HEIGHT - 0.48), 0.32),
+            _local.set(
+              x,
+              FLOOR_HEIGHT + Math.max(1.8, top - FLOOR_HEIGHT - 0.48) * 0.5 + 0.18,
+              front + 0.15,
+            ),
+            { module: 'corner-pier', radius: 0.04 },
+          );
+        }
         for (const x of [-spec.width * 0.5 + 0.26, spec.width * 0.5 - 0.26]) {
           this.addInstance(
             spec,
@@ -705,18 +805,28 @@ export class ArchitectureKit {
           );
         }
         for (let tab = -5; tab <= 5; tab += 1) {
-          this.addInstance(
+          this.addProfile(
             spec,
             tab % 2 === 0 ? 'fabric' : 'plasterOchre',
-            _scale.set(spec.width * 0.052, 0.34, 0.08),
+            [
+              [-spec.width * 0.026, 0.16],
+              [spec.width * 0.026, 0.16],
+              [spec.width * 0.024, -0.06],
+              [spec.width * 0.013, -0.22],
+              [0, -0.3],
+              [-spec.width * 0.013, -0.22],
+              [-spec.width * 0.024, -0.06],
+            ],
+            0.09,
             _local.set(
               spec.width * 0.08 + tab * spec.width * 0.056,
-              awningY - 0.14,
+              awningY - 0.16,
               front + 1.92,
             ),
             {
-              localEuler: new THREE.Euler(0.08, 0, tab * 0.004),
+              localEuler: new THREE.Euler(0.06, 0, tab * 0.004),
               module: 'awning',
+              bevel: 0.016,
             },
           );
         }
@@ -759,6 +869,34 @@ export class ArchitectureKit {
           _local.set(-spec.width * 0.39, 2.08, front + 0.59),
           { module: 'blade-sign' },
         );
+        this.addProfile(
+          spec,
+          family.trim,
+          [
+            [-1.7, -0.25],
+            [1.7, -0.25],
+            [1.2, 0.18],
+            [0, 0.82],
+            [-1.2, 0.18],
+          ],
+          0.34,
+          _local.set(0, top + 1.02, front + 0.08),
+          {
+            module: 'parapet',
+            bevel: 0.045,
+            bevelSegments: 2,
+            castShadow: true,
+          },
+        );
+        for (const x of [-spec.width * 0.38, spec.width * 0.38]) {
+          this.addInstance(
+            spec,
+            family.accent,
+            _scale.set(1.45, 0.42, 0.38),
+            _local.set(x, top + 0.93, front + 0.07),
+            { module: 'parapet', radius: 0.07 },
+          );
+        }
         break;
       }
       case 'corrugatedWorkshop': {

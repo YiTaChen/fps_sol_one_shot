@@ -3,6 +3,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { resolveQuality } from "../core/Quality.js";
 
@@ -181,10 +182,48 @@ export class RendererSystem {
       0.28,
       0.88,
     );
+    this.colorGradePass = new ShaderPass({
+      name: "CinderlineColorGrade",
+      uniforms: {
+        tDiffuse: { value: null },
+        saturation: { value: 1.055 },
+        contrast: { value: 1.035 },
+        shadowTint: { value: new THREE.Color(0x91afb1) },
+        highlightTint: { value: new THREE.Color(0xffd5a3) },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 vUv;
+        uniform sampler2D tDiffuse;
+        uniform float saturation;
+        uniform float contrast;
+        uniform vec3 shadowTint;
+        uniform vec3 highlightTint;
+        void main() {
+          vec4 source = texture2D(tDiffuse, vUv);
+          float luminance = dot(source.rgb, vec3(0.2126, 0.7152, 0.0722));
+          vec3 graded = mix(vec3(luminance), source.rgb, saturation);
+          graded = (graded - 0.18) * contrast + 0.18;
+          float shadowWeight = 1.0 - smoothstep(0.08, 0.52, luminance);
+          float highlightWeight = smoothstep(0.5, 0.94, luminance);
+          graded *= mix(vec3(1.0), shadowTint, shadowWeight * 0.055);
+          graded *= mix(vec3(1.0), highlightTint, highlightWeight * 0.045);
+          gl_FragColor = vec4(max(graded, vec3(0.0)), source.a);
+        }
+      `,
+    });
     this.outputPass = new OutputPass();
     this.composer.addPass(this.renderPass);
     this.composer.addPass(this.ssaoPass);
     this.composer.addPass(this.bloomPass);
+    this.composer.addPass(this.colorGradePass);
     this.composer.addPass(this.outputPass);
   }
 
@@ -258,6 +297,8 @@ export class RendererSystem {
     this.composer.dispose();
     this.ssaoPass.dispose();
     this.bloomPass.dispose();
+    this.colorGradePass.dispose();
+    this.outputPass.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

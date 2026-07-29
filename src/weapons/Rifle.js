@@ -9,8 +9,8 @@ const MUZZLE = new THREE.Vector3();
 const TRACER_END = new THREE.Vector3();
 const LOCAL_TARGET = new THREE.Vector3();
 const POSE_POSITION = new THREE.Vector3();
-const HIP_POSITION = new THREE.Vector3(0.225, -0.2, -0.59);
-const ADS_POSITION = new THREE.Vector3(0, -0.18, -0.49);
+const HIP_POSITION = new THREE.Vector3(0.19, -0.19, -0.68);
+const ADS_POSITION = new THREE.Vector3(0, -0.18, -0.6);
 const SPRINT_POSITION = new THREE.Vector3(0.38, -0.39, -0.24);
 const LEFT_HAND_HOME = new THREE.Vector3(-0.025, -0.006, -0.34);
 const POSE_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -215,6 +215,41 @@ function profileGeometry(points, depth, bevel = 0.006) {
   return geometry;
 }
 
+// Extrudes a Z/Y silhouette across X. Unlike a conventional box, this keeps
+// each major weapon mass readable in profile while the bevel creates a
+// continuous manufactured highlight around its full perimeter.
+function sideProfileGeometry(points, width, bevel = 0.006) {
+  const shape = new THREE.Shape();
+  shape.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i < points.length; i += 1) {
+    shape.lineTo(points[i][0], points[i][1]);
+  }
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: width,
+    bevelEnabled: bevel > 0,
+    bevelSegments: 3,
+    bevelSize: bevel,
+    bevelThickness: bevel,
+    curveSegments: 3,
+    steps: 1,
+  });
+  geometry.translate(0, 0, -width * 0.5);
+  geometry.rotateY(-Math.PI * 0.5);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+// Revolves a stepped axial profile into an optic or barrel component. Profile
+// entries are [z, radius], so the result is already aligned with the rifle.
+function axialProfileGeometry(profile, segments = 32) {
+  const points = profile.map(([z, radius]) => new THREE.Vector2(radius, z));
+  const geometry = new THREE.LatheGeometry(points, segments);
+  geometry.rotateX(Math.PI * 0.5);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function roundedPart(parent, size, position, material, radius = 0.006, segments = 2, name = '') {
   const maxRadius = Math.max(0.001, Math.min(size.x, size.y, size.z) * 0.45);
   const geometry = new RoundedBoxGeometry(
@@ -265,7 +300,7 @@ function setShadow(mesh) {
 }
 
 /**
- * Procedural Cinderline AR-7 "Kestrel" first-person rifle.
+ * Procedural Cinderline CR-27 "Vesper" first-person rifle.
  */
 export class Rifle {
   constructor(context = null, options = {}) {
@@ -294,9 +329,9 @@ export class Rifle {
     this.camera = null;
     this.viewCamera = null;
     this.root = new THREE.Group();
-    this.root.name = 'KestrelRifleViewmodel';
+    this.root.name = 'VesperRifleViewmodel';
     this.weapon = new THREE.Group();
-    this.weapon.name = 'KestrelAR7';
+    this.weapon.name = 'VesperCR27';
     this.root.add(this.weapon);
     this.object3d = this.root;
 
@@ -349,7 +384,7 @@ export class Rifle {
       spread: this.options.hipSpread,
       fireCooldown: 0,
       enabled: this.enabled,
-      weaponName: 'Kestrel AR-7',
+      weaponName: 'CR-27 Vesper',
       projectiles: this.projectiles.snapshot,
     };
 
@@ -523,6 +558,12 @@ export class Rifle {
     POSE_POSITION.x += bobX + idleX;
     POSE_POSITION.y += bobY + idleY - this.visualRecoil * 0.016;
     POSE_POSITION.z += this.visualRecoil * 0.062;
+    const exactCaptureADS = this.ads === 1
+      && this.context?.state?.phase === 'capture';
+    if (exactCaptureADS) {
+      POSE_POSITION.copy(ADS_POSITION);
+      POSE_QUATERNION.copy(ADS_QUATERNION);
+    }
     // Capture mode intentionally forces `ads` to exactly 1 before a single
     // presentation update. Normal gameplay approaches 1 asymptotically, so
     // snapping only the exact forced state preserves the authored ADS timing.
@@ -530,19 +571,17 @@ export class Rifle {
     this.root.position.lerp(POSE_POSITION, poseBlend);
     this.root.quaternion.slerp(POSE_QUATERNION, poseBlend);
     if (this.rightSleeve && this.leftSleeveMesh) {
-      const sleeveScale = THREE.MathUtils.lerp(1, 0.48, this.ads);
-      this.rightSleeve.scale.setScalar(sleeveScale);
-      this.leftSleeveMesh.scale.setScalar(sleeveScale);
-      this.rightSleeve.position.set(
-        THREE.MathUtils.lerp(0.085, 0.052, this.ads),
-        THREE.MathUtils.lerp(-0.195, -0.145, this.ads),
-        THREE.MathUtils.lerp(-0.005, 0.008, this.ads),
-      );
-      this.leftSleeveMesh.position.set(
-        THREE.MathUtils.lerp(-0.105, -0.06, this.ads),
-        THREE.MathUtils.lerp(-0.195, -0.145, this.ads),
-        THREE.MathUtils.lerp(-0.005, 0.008, this.ads),
-      );
+      const sleeveFade = smoothstep((this.ads - 0.3) / 0.62);
+      const sleeveRadius = THREE.MathUtils.lerp(1, 0.16, sleeveFade);
+      const sleeveLength = THREE.MathUtils.lerp(1, 0.42, sleeveFade);
+      this.rightSleeve.scale.set(sleeveRadius, sleeveRadius, sleeveLength);
+      this.leftSleeveMesh.scale.set(sleeveRadius, sleeveRadius, sleeveLength);
+      // The short cuffs remain visible and connected to both hands; only the
+      // near-camera forearm tubes disappear at full ADS, eliminating the broad
+      // lower-centre wedge without changing the authored sight alignment.
+      const sleevesVisible = sleeveFade < 0.985;
+      this.rightSleeve.visible = sleevesVisible;
+      this.leftSleeveMesh.visible = sleevesVisible;
     }
 
     if (this.visualRecoil > 0.001) {
@@ -861,40 +900,51 @@ export class Rifle {
       sleeve,
     );
 
-    // Receiver silhouette: two profiled, bevelled shells and contrasting controls.
-    const upperGeometry = profileGeometry([
-      [-0.047, -0.045],
-      [-0.054, 0.023],
-      [-0.038, 0.061],
-      [0.036, 0.061],
-      [0.052, 0.026],
-      [0.048, -0.045],
-    ], 0.29, 0.006);
+    // Continuous side-profiled receiver shells establish the rifle's primary
+    // silhouette. Their tapered noses, shoulder breaks and flared lower remove
+    // the previous "stacked rounded boxes" read.
+    const upperGeometry = sideProfileGeometry([
+      [-0.168, -0.026],
+      [-0.158, 0.036],
+      [-0.112, 0.074],
+      [0.102, 0.074],
+      [0.143, 0.049],
+      [0.148, -0.012],
+      [0.104, -0.052],
+      [-0.118, -0.052],
+    ], 0.104, 0.006);
     const upper = new THREE.Mesh(upperGeometry, gunmetal);
-    upper.position.set(0, 0.028, -0.025);
-    upper.name = 'bevelled-upper-receiver';
+    upper.name = 'profiled-upper-receiver';
     this.weapon.add(upper);
 
-    const lowerGeometry = profileGeometry([
-      [-0.045, 0.036],
-      [-0.05, -0.048],
-      [-0.03, -0.075],
-      [-0.018, -0.122],
-      [0.025, -0.118],
-      [0.041, -0.047],
-      [0.048, 0.036],
-    ], 0.225, 0.006);
+    const lowerGeometry = sideProfileGeometry([
+      [-0.154, 0.022],
+      [0.112, 0.022],
+      [0.132, -0.018],
+      [0.111, -0.073],
+      [0.068, -0.089],
+      [0.041, -0.139],
+      [-0.026, -0.139],
+      [-0.053, -0.081],
+      [-0.139, -0.064],
+    ], 0.094, 0.006);
     const lower = new THREE.Mesh(lowerGeometry, gunmetal);
-    lower.position.set(0, -0.022, 0.015);
-    lower.name = 'bevelled-lower-receiver';
+    lower.name = 'profiled-lower-receiver-magwell';
     this.weapon.add(lower);
 
-    roundedPart(this.weapon, new THREE.Vector3(0.087, 0.012, 0.29), new THREE.Vector3(0, 0.094, -0.025), darkMetal, 0.003, 1, 'top-rail');
-    for (let i = 0; i < 14; i += 1) {
+    const railSpine = new THREE.Mesh(sideProfileGeometry([
+      [-0.164, 0.076],
+      [0.139, 0.076],
+      [0.128, 0.094],
+      [-0.148, 0.094],
+    ], 0.083, 0.0025), darkMetal);
+    railSpine.name = 'continuous-receiver-rail';
+    this.weapon.add(railSpine);
+    for (let i = 0; i < 9; i += 1) {
       roundedPart(
         this.weapon,
-        new THREE.Vector3(0.082, 0.012, 0.009),
-        new THREE.Vector3(0, 0.105, 0.103 - i * 0.02),
+        new THREE.Vector3(0.082, 0.009, 0.014),
+        new THREE.Vector3(0, 0.101, 0.113 - i * 0.033),
         railMetal,
         0.002,
         1,
@@ -922,15 +972,15 @@ export class Rifle {
       'charging-handle',
     );
     for (const side of [-1, 1]) {
-      roundedPart(
-        this.weapon,
-        new THREE.Vector3(0.0045, 0.009, 0.235),
-        new THREE.Vector3(side * 0.052, 0.045, -0.03),
-        railMetal,
-        0.0015,
-        1,
-        'receiver-chamfer-highlight',
-      );
+      const highlight = new THREE.Mesh(sideProfileGeometry([
+        [-0.137, 0.038],
+        [0.104, 0.038],
+        [0.114, 0.046],
+        [-0.126, 0.046],
+      ], 0.003, 0), railMetal);
+      highlight.position.x = side * 0.055;
+      highlight.name = 'receiver-machined-break-line';
+      this.weapon.add(highlight);
     }
     roundedPart(
       this.weapon,
@@ -942,38 +992,107 @@ export class Rifle {
       'kestrel-identity-plate',
     );
 
-    // Octagonal free-float handguard, ribs, vents, heat-shield and rail hardware.
-    const handguard = cylinderPart(
-      this.weapon,
-      0.064,
-      0.071,
-      0.355,
-      new THREE.Vector3(0, 0.018, -0.34),
-      gunmetal,
-      8,
-      'octagonal-handguard',
-    );
-    handguard.rotation.z = Math.PI * 0.125;
-    for (let i = 0; i < 8; i += 1) {
-      const z = -0.19 - i * 0.042;
-      roundedPart(this.weapon, new THREE.Vector3(0.076, 0.011, 0.014), new THREE.Vector3(0, 0.087, z), darkMetal, 0.002, 1, 'handguard-rail');
-      roundedPart(this.weapon, new THREE.Vector3(0.01, 0.036, 0.025), new THREE.Vector3(0.066, 0.016, z), darkMetal, 0.003, 2, 'vent-recess-right');
-      roundedPart(this.weapon, new THREE.Vector3(0.01, 0.036, 0.025), new THREE.Vector3(-0.066, 0.016, z), darkMetal, 0.003, 2, 'vent-recess-left');
-    }
-    roundedPart(this.weapon, new THREE.Vector3(0.018, 0.038, 0.31), new THREE.Vector3(0, -0.052, -0.34), polymer, 0.006, 2, 'hand-stop-inlay');
-    roundedPart(this.weapon, new THREE.Vector3(0.025, 0.07, 0.035), new THREE.Vector3(0, -0.072, -0.45), polymer, 0.005, 2, 'angled-hand-stop');
+    // Free-float handguard: one tapered, side-profiled shell with bevelled
+    // shoulders. Recessed side slots sit on the shell instead of forming a
+    // stack of disconnected rail blocks.
+    const handguard = new THREE.Mesh(sideProfileGeometry([
+      [-0.596, 0.032],
+      [-0.578, 0.068],
+      [-0.535, 0.079],
+      [-0.185, 0.079],
+      [-0.149, 0.048],
+      [-0.154, -0.043],
+      [-0.188, -0.071],
+      [-0.531, -0.066],
+      [-0.579, -0.034],
+    ], 0.128, 0.007), gunmetal);
+    handguard.name = 'profiled-free-float-handguard';
+    this.weapon.add(handguard);
 
-    // Barrel, gas block, muzzle brake and machined ports.
-    cylinderPart(this.weapon, 0.012, 0.013, 0.31, new THREE.Vector3(0, 0.018, -0.665), darkMetal, 16, 'barrel');
-    roundedPart(this.weapon, new THREE.Vector3(0.046, 0.056, 0.052), new THREE.Vector3(0, 0.02, -0.535), darkMetal, 0.005, 2, 'gas-block');
-    cylinderPart(this.weapon, 0.021, 0.019, 0.078, new THREE.Vector3(0, 0.018, -0.832), railMetal, 12, 'muzzle-brake');
-    cylinderPart(this.weapon, 0.012, 0.012, 0.084, new THREE.Vector3(0, 0.018, -0.837), darkMetal, 12, 'muzzle-bore');
+    const guardRail = new THREE.Mesh(sideProfileGeometry([
+      [-0.579, 0.077],
+      [-0.16, 0.077],
+      [-0.151, 0.095],
+      [-0.562, 0.095],
+    ], 0.082, 0.0025), darkMetal);
+    guardRail.name = 'continuous-handguard-rail';
+    this.weapon.add(guardRail);
+    for (let i = 0; i < 7; i += 1) {
+      roundedPart(
+        this.weapon,
+        new THREE.Vector3(0.081, 0.008, 0.021),
+        new THREE.Vector3(0, 0.101, -0.183 - i * 0.059),
+        railMetal,
+        0.002,
+        1,
+        'handguard-rail-tooth',
+      );
+    }
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 5; i += 1) {
+        const z = -0.236 - i * 0.065;
+        const vent = new THREE.Mesh(sideProfileGeometry([
+          [z - 0.021, -0.018],
+          [z - 0.016, 0.025],
+          [z + 0.021, 0.025],
+          [z + 0.016, -0.018],
+        ], 0.004, 0.001), darkMetal);
+        vent.position.x = side * 0.066;
+        vent.name = 'machined-handguard-vent';
+        this.weapon.add(vent);
+      }
+    }
+    const lowerInlay = new THREE.Mesh(sideProfileGeometry([
+      [-0.52, -0.067],
+      [-0.22, -0.071],
+      [-0.205, -0.054],
+      [-0.505, -0.049],
+    ], 0.038, 0.003), polymer);
+    lowerInlay.name = 'contoured-handguard-inlay';
+    this.weapon.add(lowerInlay);
+    const handStop = new THREE.Mesh(sideProfileGeometry([
+      [-0.474, -0.056],
+      [-0.425, -0.057],
+      [-0.413, -0.116],
+      [-0.444, -0.129],
+      [-0.462, -0.095],
+    ], 0.044, 0.005), polymer);
+    handStop.name = 'profiled-angled-hand-stop';
+    this.weapon.add(handStop);
+
+    // A stepped turned barrel and brake form one continuous axial assembly.
+    const barrelAssembly = new THREE.Mesh(axialProfileGeometry([
+      [-0.902, 0.011],
+      [-0.895, 0.019],
+      [-0.875, 0.023],
+      [-0.817, 0.023],
+      [-0.803, 0.015],
+      [-0.592, 0.014],
+      [-0.575, 0.024],
+      [-0.535, 0.024],
+      [-0.52, 0.014],
+    ], 24), darkMetal);
+    barrelAssembly.position.y = 0.018;
+    barrelAssembly.name = 'turned-barrel-gas-block-assembly';
+    this.weapon.add(barrelAssembly);
+    const muzzleCollar = new THREE.Mesh(
+      axialProfileGeometry([
+        [-0.9, 0.019],
+        [-0.892, 0.024],
+        [-0.814, 0.024],
+        [-0.806, 0.019],
+      ], 20),
+      railMetal,
+    );
+    muzzleCollar.position.y = 0.018;
+    muzzleCollar.name = 'machined-muzzle-brake-collar';
+    this.weapon.add(muzzleCollar);
     for (const side of [-1, 1]) {
       for (let i = 0; i < 2; i += 1) {
         roundedPart(
           this.weapon,
           new THREE.Vector3(0.008, 0.012, 0.018),
-          new THREE.Vector3(side * 0.02, 0.02, -0.82 - i * 0.026),
+          new THREE.Vector3(side * 0.021, 0.018, -0.833 - i * 0.03),
           darkMetal,
           0.002,
           1,
@@ -982,47 +1101,105 @@ export class Rifle {
       }
     }
 
-    // Stock with open struts, cheek riser and textured recoil pad.
-    roundedPart(this.weapon, new THREE.Vector3(0.046, 0.045, 0.19), new THREE.Vector3(0, 0.008, 0.242), polymer, 0.007, 2, 'buffer-stock-spine');
-    const stockTop = roundedPart(this.weapon, new THREE.Vector3(0.082, 0.052, 0.22), new THREE.Vector3(0, 0.058, 0.295), polymer, 0.009, 2, 'cheek-rest');
-    stockTop.rotation.x = -0.025;
+    // Open, shouldered stock assembled from profiled cheek and lower struts.
+    // The void between them remains genuine negative space in hip-fire.
+    const bufferTube = new THREE.Mesh(axialProfileGeometry([
+      [0.115, 0.016],
+      [0.13, 0.02],
+      [0.335, 0.02],
+      [0.35, 0.017],
+    ], 18), darkMetal);
+    bufferTube.position.y = 0.01;
+    bufferTube.name = 'turned-buffer-tube';
+    this.weapon.add(bufferTube);
+    const cheekStock = new THREE.Mesh(sideProfileGeometry([
+      [0.115, 0.048],
+      [0.188, 0.071],
+      [0.352, 0.079],
+      [0.43, 0.047],
+      [0.416, 0.009],
+      [0.235, 0.014],
+      [0.139, 0.026],
+    ], 0.072, 0.008), polymer);
+    cheekStock.name = 'profiled-cheek-stock';
+    this.weapon.add(cheekStock);
     for (const side of [-1, 1]) {
-      const strut = roundedPart(this.weapon, new THREE.Vector3(0.018, 0.026, 0.2), new THREE.Vector3(side * 0.036, -0.005, 0.31), polymer, 0.006, 2, 'stock-strut');
-      strut.rotation.x = side * 0.035;
+      const strut = new THREE.Mesh(sideProfileGeometry([
+        [0.165, -0.017],
+        [0.241, -0.025],
+        [0.414, -0.091],
+        [0.434, -0.064],
+        [0.292, -0.006],
+        [0.188, 0.007],
+      ], 0.016, 0.004), polymer);
+      strut.position.x = side * 0.032;
+      strut.name = 'profiled-stock-strut';
+      this.weapon.add(strut);
     }
-    const butt = roundedPart(this.weapon, new THREE.Vector3(0.095, 0.135, 0.036), new THREE.Vector3(0, -0.005, 0.425), rubber, 0.012, 3, 'rubber-buttpad');
-    butt.rotation.x = -0.08;
+    const butt = new THREE.Mesh(sideProfileGeometry([
+      [0.405, 0.049],
+      [0.452, 0.046],
+      [0.468, 0.019],
+      [0.461, -0.095],
+      [0.427, -0.112],
+      [0.405, -0.087],
+    ], 0.084, 0.008), rubber);
+    butt.name = 'profiled-rubber-buttpad';
+    this.weapon.add(butt);
     for (let i = -2; i <= 2; i += 1) {
-      roundedPart(this.weapon, new THREE.Vector3(0.073, 0.006, 0.008), new THREE.Vector3(0, i * 0.02 - 0.005, 0.447), darkMetal, 0.002, 1, 'buttpad-rib');
+      roundedPart(this.weapon, new THREE.Vector3(0.074, 0.004, 0.008), new THREE.Vector3(0, i * 0.02 - 0.018, 0.465), darkMetal, 0.002, 1, 'buttpad-rib');
     }
 
-    // Pistol grip with inset panels, trigger guard and trigger.
-    const gripGeometry = profileGeometry([
-      [-0.033, 0.035],
-      [-0.028, -0.105],
-      [-0.007, -0.142],
-      [0.032, -0.132],
-      [0.038, 0.03],
-    ], 0.083, 0.007);
+    // Swept grip and magwell continue the lower receiver's profile rather than
+    // hanging below it as rectangular appendages.
+    const gripGeometry = sideProfileGeometry([
+      [0.053, -0.061],
+      [0.126, -0.059],
+      [0.166, -0.193],
+      [0.143, -0.232],
+      [0.091, -0.222],
+      [0.068, -0.151],
+    ], 0.076, 0.008);
     const grip = new THREE.Mesh(gripGeometry, polymer);
-    grip.position.set(0, -0.09, 0.104);
-    grip.rotation.x = -0.19;
-    grip.name = 'profiled-pistol-grip';
+    grip.name = 'swept-profiled-pistol-grip';
     this.weapon.add(grip);
-    for (let i = 0; i < 5; i += 1) {
-      roundedPart(this.weapon, new THREE.Vector3(0.07, 0.008, 0.006), new THREE.Vector3(0, -0.12 - i * 0.021, 0.142 + i * 0.003), rubber, 0.002, 1, 'grip-rib');
+    for (const side of [-1, 1]) {
+      const gripPanel = new THREE.Mesh(sideProfileGeometry([
+        [0.087, -0.105],
+        [0.121, -0.099],
+        [0.148, -0.191],
+        [0.127, -0.207],
+        [0.099, -0.196],
+      ], 0.004, 0.0015), rubber);
+      gripPanel.position.x = side * 0.041;
+      gripPanel.name = 'inset-grip-panel';
+      this.weapon.add(gripPanel);
     }
-    const guard = new THREE.Mesh(
-      new THREE.TorusGeometry(0.034, 0.0045, 6, 18, Math.PI),
-      darkMetal,
+    for (const side of [-1, 1]) {
+      const guardPath = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(side * 0.039, -0.067, -0.035),
+        new THREE.Vector3(side * 0.039, -0.112, -0.006),
+        new THREE.Vector3(side * 0.039, -0.124, 0.062),
+        new THREE.Vector3(side * 0.039, -0.081, 0.087),
+      ]);
+      const guard = new THREE.Mesh(
+        new THREE.TubeGeometry(guardPath, 18, 0.0038, 6, false),
+        darkMetal,
+      );
+      guard.name = 'swept-trigger-guard';
+      this.weapon.add(guard);
+    }
+    const triggerPath = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, -0.069, 0.014),
+      new THREE.Vector3(0, -0.087, 0.031),
+      new THREE.Vector3(0, -0.108, 0.035),
+    ]);
+    const trigger = new THREE.Mesh(
+      new THREE.TubeGeometry(triggerPath, 10, 0.0035, 6, false),
+      exposedMetal,
     );
-    guard.position.set(0, -0.083, 0.035);
-    guard.rotation.set(Math.PI * 0.5, 0, 0);
-    guard.scale.set(1.35, 1, 1);
-    guard.name = 'trigger-guard';
-    this.weapon.add(guard);
-    const trigger = roundedPart(this.weapon, new THREE.Vector3(0.009, 0.045, 0.009), new THREE.Vector3(0, -0.094, 0.046), exposedMetal, 0.003, 2, 'trigger');
-    trigger.rotation.x = -0.25;
+    trigger.name = 'curved-trigger';
+    this.weapon.add(trigger);
 
     // Curved magazine with base plate, witness detail and stamped ribs.
     this.magazineMesh = new THREE.Group();
@@ -1030,64 +1207,127 @@ export class Rifle {
     this.magazineMesh.position.set(0, -0.136, 0.015);
     this.magazineMesh.rotation.set(-0.15, 0, 0.035);
     this.weapon.add(this.magazineMesh);
-    const magBody = roundedPart(this.magazineMesh, new THREE.Vector3(0.072, 0.205, 0.104), new THREE.Vector3(0, -0.08, 0), polymer, 0.009, 3, 'curved-magazine-body');
-    magBody.rotation.x = -0.08;
-    roundedPart(this.magazineMesh, new THREE.Vector3(0.081, 0.018, 0.116), new THREE.Vector3(0, -0.188, 0.012), accentMetal, 0.004, 2, 'magazine-baseplate');
+    const magBody = new THREE.Mesh(sideProfileGeometry([
+      [-0.052, 0.017],
+      [0.052, 0.017],
+      [0.071, -0.055],
+      [0.078, -0.151],
+      [0.054, -0.218],
+      [0.006, -0.228],
+      [-0.031, -0.195],
+      [-0.046, -0.087],
+    ], 0.068, 0.008), polymer);
+    magBody.name = 'curved-profiled-magazine-body';
+    this.magazineMesh.add(magBody);
+    const magBase = new THREE.Mesh(sideProfileGeometry([
+      [-0.002, -0.22],
+      [0.061, -0.211],
+      [0.071, -0.234],
+      [0.006, -0.247],
+      [-0.015, -0.236],
+    ], 0.078, 0.004), accentMetal);
+    magBase.name = 'profiled-magazine-baseplate';
+    this.magazineMesh.add(magBase);
     for (const x of [-0.026, 0.026]) {
-      roundedPart(this.magazineMesh, new THREE.Vector3(0.006, 0.15, 0.006), new THREE.Vector3(x, -0.08, -0.054), gunmetal, 0.002, 1, 'magazine-stamp-rib');
+      const stamp = new THREE.Mesh(sideProfileGeometry([
+        [-0.043, -0.02],
+        [-0.031, -0.18],
+        [-0.024, -0.191],
+        [-0.033, -0.018],
+      ], 0.004, 0.001), gunmetal);
+      stamp.position.x = x;
+      stamp.name = 'magazine-stamp-rib';
+      this.magazineMesh.add(stamp);
     }
     for (let i = 0; i < 3; i += 1) {
       cylinderPart(this.magazineMesh, 0.004, 0.004, 0.004, new THREE.Vector3(0.038, -0.05 - i * 0.045, 0.03), brass, 8, 'witness-round').rotation.y = Math.PI * 0.5;
     }
 
-    // Low-profile holographic optic with hood, elevation controls and layered glass.
+    // Rounded Aster reflex optic. A turned, tapered housing provides a circular
+    // silhouette; a profiled saddle and precise concentric bezel keep it
+    // mechanically grounded without the former square hood.
     const optic = new THREE.Group();
     optic.name = 'Aster-Holo-Optic';
     optic.position.set(0, 0.135, -0.045);
     this.weapon.add(optic);
-    roundedPart(optic, new THREE.Vector3(0.086, 0.03, 0.138), new THREE.Vector3(0, -0.015, 0), darkMetal, 0.006, 2, 'optic-base');
+    const opticSaddle = new THREE.Mesh(sideProfileGeometry([
+      [-0.071, -0.027],
+      [0.071, -0.027],
+      [0.056, 0.003],
+      [0.032, 0.012],
+      [-0.034, 0.012],
+      [-0.058, 0.002],
+    ], 0.076, 0.005), darkMetal);
+    opticSaddle.name = 'profiled-optic-saddle';
+    optic.add(opticSaddle);
+    const opticHousing = new THREE.Mesh(axialProfileGeometry([
+      [-0.064, 0.039],
+      [-0.059, 0.047],
+      [-0.047, 0.052],
+      [0.033, 0.052],
+      [0.047, 0.047],
+      [0.055, 0.039],
+    ], 36), gunmetal);
+    opticHousing.position.y = 0.045;
+    opticHousing.name = 'turned-rounded-optic-housing';
+    optic.add(opticHousing);
     for (const side of [-1, 1]) {
-      roundedPart(optic, new THREE.Vector3(0.014, 0.09, 0.1), new THREE.Vector3(side * 0.04, 0.04, -0.005), gunmetal, 0.005, 2, 'optic-hood-side');
+      const saddleShoulder = new THREE.Mesh(sideProfileGeometry([
+        [-0.052, 0.001],
+        [0.043, 0.001],
+        [0.034, 0.024],
+        [-0.036, 0.024],
+      ], 0.01, 0.002), gunmetal);
+      saddleShoulder.position.x = side * 0.036;
+      saddleShoulder.name = 'optic-saddle-shoulder';
+      optic.add(saddleShoulder);
     }
-    roundedPart(optic, new THREE.Vector3(0.084, 0.014, 0.1), new THREE.Vector3(0, 0.084, -0.005), gunmetal, 0.004, 2, 'optic-hood-top');
-    // A single optical plane and flat, concentric bezels avoid the lumpy
-    // double-torus silhouette that appeared when both lens rims overlapped.
-    const sightGlass = new THREE.Mesh(new THREE.CircleGeometry(0.0315, 48), opticGlass);
-    sightGlass.position.set(0, 0.045, 0.048);
-    sightGlass.name = 'optic-sight-glass';
-    optic.add(sightGlass);
-    const lensBezel = new THREE.Mesh(
-      new THREE.RingGeometry(0.0315, 0.038, 64),
+    const frontBezel = new THREE.Mesh(
+      new THREE.TorusGeometry(0.043, 0.0035, 10, 48),
       darkMetal,
     );
-    lensBezel.position.set(0, 0.045, 0.0505);
-    lensBezel.name = 'optic-machined-bezel';
-    optic.add(lensBezel);
-    const lensAccent = new THREE.Mesh(
-      new THREE.RingGeometry(0.0366, 0.0375, 64),
+    frontBezel.position.set(0, 0.045, -0.061);
+    frontBezel.name = 'optic-front-machined-bezel';
+    optic.add(frontBezel);
+    const rearBezel = new THREE.Mesh(
+      new THREE.TorusGeometry(0.043, 0.0035, 10, 48),
       railMetal,
     );
-    lensAccent.position.set(0, 0.045, 0.051);
-    lensAccent.name = 'optic-bezel-highlight';
-    optic.add(lensAccent);
+    rearBezel.position.set(0, 0.045, 0.055);
+    rearBezel.name = 'optic-rear-machined-bezel';
+    optic.add(rearBezel);
+    const sightGlass = new THREE.Mesh(new THREE.CircleGeometry(0.0395, 64), opticGlass);
+    sightGlass.position.set(0, 0.045, 0.053);
+    sightGlass.name = 'optic-sight-glass';
+    optic.add(sightGlass);
     const lensGasket = new THREE.Mesh(
-      new THREE.RingGeometry(0.0303, 0.0316, 64),
+      new THREE.RingGeometry(0.0382, 0.0402, 64),
       rubber,
     );
-    lensGasket.position.set(0, 0.045, 0.0515);
+    lensGasket.position.set(0, 0.045, 0.0555);
     lensGasket.name = 'optic-lens-gasket';
     optic.add(lensGasket);
     const dot = new THREE.Mesh(new THREE.RingGeometry(0.0036, 0.0044, 48), reticle);
-    dot.position.set(0, 0.045, 0.052);
+    dot.position.set(0, 0.045, 0.056);
     dot.name = 'projected-reticle';
     optic.add(dot);
     const centerDot = new THREE.Mesh(new THREE.CircleGeometry(0.0011, 24), reticle);
-    centerDot.position.set(0, 0.045, 0.0522);
+    centerDot.position.set(0, 0.045, 0.0562);
     centerDot.name = 'projected-reticle-center';
     optic.add(centerDot);
-    cylinderPart(optic, 0.013, 0.013, 0.012, new THREE.Vector3(0.055, 0.035, 0.012), darkMetal, 12, 'brightness-dial').rotation.y = Math.PI * 0.5;
-    for (let i = 0; i < 5; i += 1) {
-      roundedPart(optic, new THREE.Vector3(0.008, 0.025, 0.004), new THREE.Vector3(0.063, 0.035, -0.003 + i * 0.007), exposedMetal, 0.001, 1, 'dial-knurl');
+    const brightnessDial = cylinderPart(
+      optic,
+      0.014,
+      0.014,
+      0.013,
+      new THREE.Vector3(0.056, 0.041, 0.008),
+      darkMetal,
+      20,
+      'brightness-dial',
+    );
+    brightnessDial.rotation.y = Math.PI * 0.5;
+    for (let i = 0; i < 4; i += 1) {
+      roundedPart(optic, new THREE.Vector3(0.006, 0.018, 0.003), new THREE.Vector3(0.064, 0.041, -0.001 + i * 0.006), exposedMetal, 0.001, 1, 'dial-knurl');
     }
 
     // Sling points and a tiny identity plate add readable meso/micro structure.
@@ -1105,48 +1345,99 @@ export class Rifle {
   }
 
   _buildHands(glove, sleeve, rubber) {
-    // Right sleeve and hand remain locked to the grip.
+    // Shared, slender articulated phalanges. The previous large capsules read
+    // as block lobes; these two-stage fingers taper toward smaller distal
+    // segments and follow the surfaces they grip.
+    const fingerProximalGeometry = new THREE.CapsuleGeometry(0.0074, 0.027, 5, 10);
+    const fingerDistalGeometry = new THREE.CapsuleGeometry(0.0065, 0.021, 5, 10);
+    const thumbProximalGeometry = new THREE.CapsuleGeometry(0.0085, 0.03, 5, 10);
+    const thumbDistalGeometry = new THREE.CapsuleGeometry(0.0074, 0.023, 5, 10);
+
+    // Right hand stays locked to the swept pistol grip. Its palm is a tapered,
+    // bevelled volume instead of a rounded rectangular mitten.
     const rightArm = new THREE.Group();
     rightArm.name = 'right-arm';
     rightArm.position.set(0.052, -0.13, 0.11);
     rightArm.rotation.set(-0.12, -0.08, -0.08);
     this.weapon.add(rightArm);
-    const rightSleeve = cylinderPart(rightArm, 0.045, 0.058, 0.235, new THREE.Vector3(0.085, -0.195, -0.005), sleeve, 16, 'right-sleeve');
+    const rightPalm = new THREE.Mesh(profileGeometry([
+      [-0.047, 0.019],
+      [-0.029, 0.035],
+      [0.026, 0.031],
+      [0.046, 0.006],
+      [0.035, -0.058],
+      [0.009, -0.073],
+      [-0.035, -0.064],
+      [-0.052, -0.026],
+    ], 0.07, 0.009), glove);
+    rightPalm.position.z = 0.012;
+    rightPalm.rotation.x = -0.08;
+    rightPalm.name = 'anatomical-right-palm';
+    rightArm.add(rightPalm);
+    const rightCuff = cylinderPart(
+      rightArm,
+      0.036,
+      0.041,
+      0.052,
+      new THREE.Vector3(0.018, -0.096, 0.039),
+      rubber,
+      20,
+      'right-shaped-cuff',
+    );
+    rightCuff.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(-0.52, 0.79, 0.33).normalize(),
+    );
+    const rightSleeve = cylinderPart(
+      rightArm,
+      0.03,
+      0.038,
+      0.13,
+      new THREE.Vector3(0.071, -0.164, 0.012),
+      sleeve,
+      20,
+      'right-tapered-forearm',
+    );
     this.rightSleeve = rightSleeve;
     rightSleeve.quaternion.setFromUnitVectors(
       new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(-0.6, 0.78, 0.38).normalize(),
+      new THREE.Vector3(-0.58, 0.76, 0.29).normalize(),
     );
-    roundedPart(rightArm, new THREE.Vector3(0.1, 0.062, 0.082), new THREE.Vector3(0.005, -0.038, 0.018), glove, 0.016, 3, 'right-palm');
-    roundedPart(rightArm, new THREE.Vector3(0.105, 0.032, 0.096), new THREE.Vector3(0.01, -0.102, 0.04), rubber, 0.009, 2, 'right-cuff');
 
-    const gripFingerGeometry = new THREE.CapsuleGeometry(0.0115, 0.032, 4, 8);
-    const gripTipGeometry = new THREE.CapsuleGeometry(0.0105, 0.026, 4, 8);
+    // Middle, ring and little fingers curl around the grip in two joints.
     for (let i = 0; i < 3; i += 1) {
-      const proximal = new THREE.Mesh(gripFingerGeometry, glove);
-      proximal.position.set(-0.004, 0.004 - i * 0.035, -0.034);
-      proximal.rotation.set(0.08, 0.02, Math.PI * 0.5);
+      const y = -0.004 - i * 0.026;
+      const proximal = new THREE.Mesh(fingerProximalGeometry, glove);
+      proximal.position.set(-0.018, y, -0.029);
+      proximal.rotation.set(0.06, 0.05, 1.28);
       proximal.name = `right-grip-finger-${i + 1}-proximal`;
       rightArm.add(proximal);
-      const distal = new THREE.Mesh(gripTipGeometry, glove);
-      distal.position.set(-0.043, 0.004 - i * 0.035, -0.014);
-      distal.rotation.set(Math.PI * 0.48, 0.08, 0.06);
+      const distal = new THREE.Mesh(fingerDistalGeometry, glove);
+      distal.position.set(-0.043, y - 0.003, -0.011);
+      distal.rotation.set(1.32, 0.08, 0.08);
       distal.name = `right-grip-finger-${i + 1}-distal`;
       rightArm.add(distal);
     }
-    const triggerFinger = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.012, 0.064, 4, 8),
-      glove,
-    );
-    triggerFinger.position.set(-0.043, 0.04, -0.052);
-    triggerFinger.rotation.set(Math.PI * 0.49, 0.1, 0.12);
-    triggerFinger.name = 'right-trigger-finger';
-    rightArm.add(triggerFinger);
-    const rightThumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, 0.058, 4, 8), glove);
-    rightThumb.position.set(0.036, -0.008, -0.026);
-    rightThumb.rotation.set(Math.PI * 0.42, 0, -0.58);
-    rightThumb.name = 'right-thumb';
-    rightArm.add(rightThumb);
+    const triggerProximal = new THREE.Mesh(fingerProximalGeometry, glove);
+    triggerProximal.position.set(-0.015, 0.026, -0.031);
+    triggerProximal.rotation.set(0.08, 0.03, 1.18);
+    triggerProximal.name = 'right-trigger-finger-proximal';
+    rightArm.add(triggerProximal);
+    const triggerDistal = new THREE.Mesh(fingerDistalGeometry, glove);
+    triggerDistal.position.set(-0.039, 0.032, -0.047);
+    triggerDistal.rotation.set(1.38, 0.08, 0.19);
+    triggerDistal.name = 'right-trigger-finger-distal';
+    rightArm.add(triggerDistal);
+    const rightThumbProximal = new THREE.Mesh(thumbProximalGeometry, glove);
+    rightThumbProximal.position.set(0.027, 0.002, -0.018);
+    rightThumbProximal.rotation.set(1.11, -0.08, -0.52);
+    rightThumbProximal.name = 'right-thumb-proximal';
+    rightArm.add(rightThumbProximal);
+    const rightThumbDistal = new THREE.Mesh(thumbDistalGeometry, glove);
+    rightThumbDistal.position.set(0.041, -0.006, -0.042);
+    rightThumbDistal.rotation.set(1.34, -0.06, -0.38);
+    rightThumbDistal.name = 'right-thumb-distal';
+    rightArm.add(rightThumbDistal);
 
     // Left support hand wraps the underside and sides of the handguard.
     this.leftHand = new THREE.Group();
@@ -1154,40 +1445,75 @@ export class Rifle {
     this.leftHand.position.copy(LEFT_HAND_HOME);
     this.leftHand.rotation.set(0.035, 0.01, -0.045);
     this.weapon.add(this.leftHand);
-    roundedPart(this.leftHand, new THREE.Vector3(0.092, 0.048, 0.12), new THREE.Vector3(-0.018, -0.057, 0), glove, 0.016, 3, 'left-palm');
-    roundedPart(this.leftHand, new THREE.Vector3(0.105, 0.032, 0.105), new THREE.Vector3(-0.035, -0.103, 0.04), rubber, 0.009, 2, 'left-cuff');
-    const leftSleeve = cylinderPart(this.leftHand, 0.045, 0.058, 0.235, new THREE.Vector3(-0.105, -0.195, -0.005), sleeve, 16, 'left-sleeve');
+    const leftPalm = new THREE.Mesh(profileGeometry([
+      [-0.052, 0.012],
+      [-0.034, 0.03],
+      [0.031, 0.028],
+      [0.05, 0.003],
+      [0.037, -0.061],
+      [0.008, -0.078],
+      [-0.038, -0.067],
+      [-0.056, -0.029],
+    ], 0.102, 0.009), glove);
+    leftPalm.position.set(-0.014, -0.006, 0);
+    leftPalm.rotation.set(0.03, 0, -0.05);
+    leftPalm.name = 'anatomical-left-support-palm';
+    this.leftHand.add(leftPalm);
+    const leftCuff = cylinderPart(
+      this.leftHand,
+      0.036,
+      0.042,
+      0.054,
+      new THREE.Vector3(-0.034, -0.106, 0.034),
+      rubber,
+      20,
+      'left-shaped-cuff',
+    );
+    leftCuff.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0.5, 0.8, 0.31).normalize(),
+    );
+    const leftSleeve = cylinderPart(
+      this.leftHand,
+      0.03,
+      0.038,
+      0.13,
+      new THREE.Vector3(-0.083, -0.171, 0.008),
+      sleeve,
+      20,
+      'left-tapered-forearm',
+    );
     this.leftSleeveMesh = leftSleeve;
     leftSleeve.quaternion.setFromUnitVectors(
       new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0.6, 0.78, 0.38).normalize(),
+      new THREE.Vector3(0.55, 0.78, 0.29).normalize(),
     );
 
-    const supportFingerGeometry = new THREE.CapsuleGeometry(0.012, 0.042, 4, 8);
-    const supportTipGeometry = new THREE.CapsuleGeometry(0.011, 0.032, 4, 8);
+    // Four separated support fingers form a C-clamp around the rail. Their
+    // distal joints terminate against the far face instead of passing through.
     for (let i = 0; i < 4; i += 1) {
-      const z = -0.045 + i * 0.03;
-      const proximal = new THREE.Mesh(supportFingerGeometry, glove);
-      proximal.position.set(0.012, -0.051, z);
-      proximal.rotation.set(0.04, 0.02, -Math.PI * 0.5);
+      const z = -0.041 + i * 0.027;
+      const proximal = new THREE.Mesh(fingerProximalGeometry, glove);
+      proximal.position.set(0.018, -0.054, z);
+      proximal.rotation.set(0.04, 0.03, -1.27);
       proximal.name = `left-support-finger-${i + 1}-proximal`;
       this.leftHand.add(proximal);
-      const distal = new THREE.Mesh(supportTipGeometry, glove);
-      distal.position.set(0.05, -0.018, z);
-      distal.rotation.set(0.04, 0, -0.16);
+      const distal = new THREE.Mesh(fingerDistalGeometry, glove);
+      distal.position.set(0.059, -0.026, z);
+      distal.rotation.set(0.05, 0.02, -0.2);
       distal.name = `left-support-finger-${i + 1}-distal`;
       this.leftHand.add(distal);
     }
-    const leftThumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.015, 0.073, 4, 8), glove);
-    leftThumb.position.set(-0.044, -0.004, -0.032);
-    leftThumb.rotation.set(Math.PI * 0.43, 0.12, -0.32);
-    leftThumb.name = 'left-thumb';
-    this.leftHand.add(leftThumb);
-
-    // Fabric bridges between gloves and cuffs eliminate the former exposed
-    // wrist strip while preserving an anatomically continuous silhouette.
-    roundedPart(rightArm, new THREE.Vector3(0.086, 0.022, 0.07), new THREE.Vector3(0.008, -0.122, 0.05), sleeve, 0.007, 2, 'right-wrist-transition');
-    roundedPart(this.leftHand, new THREE.Vector3(0.09, 0.02, 0.075), new THREE.Vector3(-0.032, -0.126, 0.052), sleeve, 0.007, 2, 'left-wrist-transition');
+    const leftThumbProximal = new THREE.Mesh(thumbProximalGeometry, glove);
+    leftThumbProximal.position.set(-0.038, -0.002, -0.024);
+    leftThumbProximal.rotation.set(1.12, 0.08, -0.3);
+    leftThumbProximal.name = 'left-thumb-proximal';
+    this.leftHand.add(leftThumbProximal);
+    const leftThumbDistal = new THREE.Mesh(thumbDistalGeometry, glove);
+    leftThumbDistal.position.set(-0.032, 0.003, -0.052);
+    leftThumbDistal.rotation.set(1.37, 0.1, -0.2);
+    leftThumbDistal.name = 'left-thumb-distal';
+    this.leftHand.add(leftThumbDistal);
   }
 
   _syncSnapshot() {
