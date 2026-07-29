@@ -9,13 +9,14 @@ const MUZZLE = new THREE.Vector3();
 const TRACER_END = new THREE.Vector3();
 const LOCAL_TARGET = new THREE.Vector3();
 const POSE_POSITION = new THREE.Vector3();
-const HIP_POSITION = new THREE.Vector3(0.245, -0.245, -0.47);
-const ADS_POSITION = new THREE.Vector3(0, -0.126, -0.415);
+const HIP_POSITION = new THREE.Vector3(0.225, -0.2, -0.59);
+const ADS_POSITION = new THREE.Vector3(0, -0.18, -0.49);
 const SPRINT_POSITION = new THREE.Vector3(0.38, -0.39, -0.24);
+const LEFT_HAND_HOME = new THREE.Vector3(-0.025, -0.006, -0.34);
 const POSE_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
 const POSE_QUATERNION = new THREE.Quaternion();
 const HIP_QUATERNION = new THREE.Quaternion().setFromEuler(
-  new THREE.Euler(0.018, -0.045, 0.018, 'YXZ'),
+  new THREE.Euler(0.028, -0.075, 0.022, 'YXZ'),
 );
 const ADS_QUATERNION = new THREE.Quaternion();
 const SPRINT_QUATERNION = new THREE.Quaternion().setFromEuler(
@@ -162,7 +163,7 @@ function rngFloat(stream) {
 }
 
 function makeTexture(base, variation, seed, roughness = false) {
-  const size = 64;
+  const size = 128;
   const data = new Uint8Array(size * size * 4);
   const seedValue = hashSeed(seed);
   for (let y = 0; y < size; y += 1) {
@@ -189,7 +190,7 @@ function makeTexture(base, variation, seed, roughness = false) {
   const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2.5, 4);
+  texture.repeat.set(3.4, 5.5);
   texture.colorSpace = roughness ? THREE.NoColorSpace : THREE.SRGBColorSpace;
   texture.needsUpdate = true;
   return texture;
@@ -325,6 +326,8 @@ export class Rifle {
     this._materials = [];
     this._textures = [];
     this._modelBuilt = false;
+    this.rightSleeve = null;
+    this.leftSleeveMesh = null;
     this._rng = new LocalRng('cinderline:weapon-spread');
     this._reloadFromEmpty = false;
 
@@ -393,6 +396,11 @@ export class Rifle {
     const next = Boolean(enabled);
     if (next === this.adsWanted) return;
     this.adsWanted = next;
+    if (this.context?.state?.phase === 'capture') {
+      this.ads = next ? 1 : 0;
+      this.root.position.copy(next ? ADS_POSITION : HIP_POSITION);
+      this.root.quaternion.copy(next ? ADS_QUATERNION : HIP_QUATERNION);
+    }
     emit(this.events, 'weapon:ads', { enabled: next });
   }
 
@@ -515,8 +523,27 @@ export class Rifle {
     POSE_POSITION.x += bobX + idleX;
     POSE_POSITION.y += bobY + idleY - this.visualRecoil * 0.016;
     POSE_POSITION.z += this.visualRecoil * 0.062;
-    this.root.position.lerp(POSE_POSITION, 1 - Math.exp(-20 * dt));
-    this.root.quaternion.slerp(POSE_QUATERNION, 1 - Math.exp(-20 * dt));
+    // Capture mode intentionally forces `ads` to exactly 1 before a single
+    // presentation update. Normal gameplay approaches 1 asymptotically, so
+    // snapping only the exact forced state preserves the authored ADS timing.
+    const poseBlend = this.ads === 1 ? 1 : 1 - Math.exp(-20 * dt);
+    this.root.position.lerp(POSE_POSITION, poseBlend);
+    this.root.quaternion.slerp(POSE_QUATERNION, poseBlend);
+    if (this.rightSleeve && this.leftSleeveMesh) {
+      const sleeveScale = THREE.MathUtils.lerp(1, 0.48, this.ads);
+      this.rightSleeve.scale.setScalar(sleeveScale);
+      this.leftSleeveMesh.scale.setScalar(sleeveScale);
+      this.rightSleeve.position.set(
+        THREE.MathUtils.lerp(0.085, 0.052, this.ads),
+        THREE.MathUtils.lerp(-0.195, -0.145, this.ads),
+        THREE.MathUtils.lerp(-0.005, 0.008, this.ads),
+      );
+      this.leftSleeveMesh.position.set(
+        THREE.MathUtils.lerp(-0.105, -0.06, this.ads),
+        THREE.MathUtils.lerp(-0.195, -0.145, this.ads),
+        THREE.MathUtils.lerp(-0.005, 0.008, this.ads),
+      );
+    }
 
     if (this.visualRecoil > 0.001) {
       POSE_EULER.set(-this.visualRecoil * 0.085, this.visualRecoil * 0.018, 0, 'YXZ');
@@ -663,8 +690,8 @@ export class Rifle {
       this.magazineMesh.visible = true;
       this.magazineMesh.position.set(0, -0.136, 0.015);
       this.magazineMesh.rotation.set(-0.15, 0, 0.035);
-      this.leftHand.position.set(-0.075, -0.012, -0.31);
-      this.leftHand.rotation.set(0.05, 0.02, -0.08);
+      this.leftHand.position.copy(LEFT_HAND_HOME);
+      this.leftHand.rotation.set(0.035, 0.01, -0.045);
       return;
     }
 
@@ -678,11 +705,15 @@ export class Rifle {
     if (p < 0.42) {
       const handT = smoothstep((p - 0.05) / 0.22);
       this.leftHand.position.lerpVectors(
-        LOCAL_TARGET.set(-0.075, -0.012, -0.31),
+        LOCAL_TARGET.copy(LEFT_HAND_HOME),
         POSE_POSITION.set(-0.02, -0.18, 0.015),
         handT,
       );
-      this.leftHand.rotation.set(0.28 * handT, -0.15 * handT, -0.08 - 0.28 * handT);
+      this.leftHand.rotation.set(
+        0.035 + 0.245 * handT,
+        0.01 - 0.16 * handT,
+        -0.045 - 0.315 * handT,
+      );
       const magT = smoothstep((p - 0.2) / 0.2);
       this.magazineMesh.position.set(0.02 * magT, -0.136 - magT * 0.27, 0.015 + magT * 0.08);
       this.magazineMesh.rotation.set(-0.15 - magT * 0.38, 0, 0.035 + magT * 0.14);
@@ -713,10 +744,14 @@ export class Rifle {
       this.magazineMesh.rotation.set(-0.15, 0, 0.035);
       this.leftHand.position.lerpVectors(
         LOCAL_TARGET.set(-0.02, -0.18, 0.015),
-        POSE_POSITION.set(-0.075, -0.012, -0.31),
+        POSE_POSITION.copy(LEFT_HAND_HOME),
         returnT,
       );
-      this.leftHand.rotation.set(0.22 * (1 - returnT) + 0.05, -0.1 * (1 - returnT), -0.16 + 0.08 * returnT);
+      this.leftHand.rotation.set(
+        THREE.MathUtils.lerp(0.22, 0.035, returnT),
+        THREE.MathUtils.lerp(-0.1, 0.01, returnT),
+        THREE.MathUtils.lerp(-0.16, -0.045, returnT),
+      );
       if (this._reloadFromEmpty && p > 0.77 && p < 0.9 && this.chargingHandle) {
         this.chargingHandle.position.z = 0.08 + Math.sin((p - 0.77) / 0.13 * Math.PI) * 0.075;
       }
@@ -725,38 +760,52 @@ export class Rifle {
 
   _buildModel() {
     this._modelBuilt = true;
-    const metalMap = makeTexture([49, 54, 56], 18, 'weapon-metal');
-    const metalRough = makeTexture([106, 106, 106], 50, 'weapon-metal-r', true);
-    const polymerMap = makeTexture([41, 47, 43], 15, 'weapon-polymer');
-    const polymerRough = makeTexture([180, 180, 180], 38, 'weapon-polymer-r', true);
-    const gloveMap = makeTexture([63, 70, 61], 22, 'weapon-glove');
+    const metalMap = makeTexture([78, 85, 87], 22, 'weapon-metal');
+    const metalRough = makeTexture([112, 112, 112], 48, 'weapon-metal-r', true);
+    const polymerMap = makeTexture([67, 76, 68], 18, 'weapon-polymer');
+    const polymerRough = makeTexture([172, 172, 172], 34, 'weapon-polymer-r', true);
+    const gloveMap = makeTexture([73, 84, 70], 24, 'weapon-glove');
     const gloveRough = makeTexture([205, 205, 205], 26, 'weapon-glove-r', true);
     this._textures.push(metalMap, metalRough, polymerMap, polymerRough, gloveMap, gloveRough);
 
-    const gunmetal = new THREE.MeshStandardMaterial({
+    const gunmetal = new THREE.MeshPhysicalMaterial({
       map: metalMap,
       roughnessMap: metalRough,
-      roughness: 0.46,
-      metalness: 0.82,
+      roughness: 0.39,
+      metalness: 0.42,
+      clearcoat: 0.2,
+      clearcoatRoughness: 0.38,
     });
-    const darkMetal = new THREE.MeshStandardMaterial({
-      color: 0x171b1c,
-      roughness: 0.34,
-      metalness: 0.9,
+    const darkMetal = new THREE.MeshPhysicalMaterial({
+      color: 0x343b3d,
+      roughness: 0.4,
+      metalness: 0.52,
+      clearcoat: 0.13,
+      clearcoatRoughness: 0.4,
     });
     const exposedMetal = new THREE.MeshStandardMaterial({
-      color: 0xa5a49a,
-      roughness: 0.25,
-      metalness: 0.96,
+      color: 0xb1b3aa,
+      roughness: 0.3,
+      metalness: 0.82,
+    });
+    const railMetal = new THREE.MeshStandardMaterial({
+      color: 0x737a77,
+      roughness: 0.34,
+      metalness: 0.72,
+    });
+    const accentMetal = new THREE.MeshStandardMaterial({
+      color: 0x9a7443,
+      roughness: 0.38,
+      metalness: 0.64,
     });
     const polymer = new THREE.MeshStandardMaterial({
       map: polymerMap,
       roughnessMap: polymerRough,
-      roughness: 0.78,
-      metalness: 0.06,
+      roughness: 0.7,
+      metalness: 0.03,
     });
     const rubber = new THREE.MeshStandardMaterial({
-      color: 0x151713,
+      color: 0x232823,
       roughness: 0.94,
       metalness: 0,
     });
@@ -766,21 +815,24 @@ export class Rifle {
       metalness: 0.82,
     });
     const opticGlass = new THREE.MeshPhysicalMaterial({
-      color: 0x4f8190,
-      emissive: 0x102d34,
-      emissiveIntensity: 0.45,
-      metalness: 0.05,
-      roughness: 0.08,
-      transmission: 0.32,
+      color: 0x78aaa7,
+      emissive: 0x0b2426,
+      emissiveIntensity: 0.28,
+      metalness: 0,
+      roughness: 0.16,
+      transmission: 0,
       transparent: true,
-      opacity: 0.78,
+      opacity: 0.2,
       thickness: 0.008,
+      depthWrite: false,
+      side: THREE.DoubleSide,
     });
     const reticle = new THREE.MeshBasicMaterial({
       color: 0x79e5d2,
       transparent: true,
       opacity: 0.9,
-      depthTest: false,
+      depthTest: true,
+      depthWrite: false,
       toneMapped: false,
     });
     const glove = new THREE.MeshStandardMaterial({
@@ -790,19 +842,16 @@ export class Rifle {
       metalness: 0,
     });
     const sleeve = new THREE.MeshStandardMaterial({
-      color: 0x536052,
+      color: 0x3f4c41,
       roughness: 0.96,
-      metalness: 0,
-    });
-    const skin = new THREE.MeshStandardMaterial({
-      color: 0x9d7156,
-      roughness: 0.86,
       metalness: 0,
     });
     this._materials.push(
       gunmetal,
       darkMetal,
       exposedMetal,
+      railMetal,
+      accentMetal,
       polymer,
       rubber,
       brass,
@@ -810,7 +859,6 @@ export class Rifle {
       reticle,
       glove,
       sleeve,
-      skin,
     );
 
     // Receiver silhouette: two profiled, bevelled shells and contrasting controls.
@@ -847,7 +895,7 @@ export class Rifle {
         this.weapon,
         new THREE.Vector3(0.082, 0.012, 0.009),
         new THREE.Vector3(0, 0.105, 0.103 - i * 0.02),
-        exposedMetal,
+        railMetal,
         0.002,
         1,
         'rail-tooth',
@@ -858,7 +906,7 @@ export class Rifle {
     roundedPart(this.weapon, new THREE.Vector3(0.052, 0.043, 0.09), new THREE.Vector3(0.045, 0.033, -0.015), darkMetal, 0.004, 2, 'ejection-port');
     roundedPart(this.weapon, new THREE.Vector3(0.004, 0.027, 0.072), new THREE.Vector3(0.073, 0.034, -0.015), exposedMetal, 0.0015, 1, 'bolt-face');
     cylinderPart(this.weapon, 0.012, 0.012, 0.014, new THREE.Vector3(0.055, -0.005, 0.092), darkMetal, 12, 'forward-assist').rotation.y = Math.PI * 0.5;
-    cylinderPart(this.weapon, 0.009, 0.009, 0.012, new THREE.Vector3(-0.055, -0.027, 0.06), exposedMetal, 12, 'selector').rotation.y = Math.PI * 0.5;
+    cylinderPart(this.weapon, 0.009, 0.009, 0.012, new THREE.Vector3(-0.055, -0.027, 0.06), accentMetal, 12, 'selector').rotation.y = Math.PI * 0.5;
     for (const z of [-0.085, 0.065]) {
       const pin = cylinderPart(this.weapon, 0.006, 0.006, 0.012, new THREE.Vector3(-0.054, -0.04, z), exposedMetal, 10, 'receiver-pin');
       pin.rotation.y = Math.PI * 0.5;
@@ -872,6 +920,26 @@ export class Rifle {
       0.004,
       2,
       'charging-handle',
+    );
+    for (const side of [-1, 1]) {
+      roundedPart(
+        this.weapon,
+        new THREE.Vector3(0.0045, 0.009, 0.235),
+        new THREE.Vector3(side * 0.052, 0.045, -0.03),
+        railMetal,
+        0.0015,
+        1,
+        'receiver-chamfer-highlight',
+      );
+    }
+    roundedPart(
+      this.weapon,
+      new THREE.Vector3(0.0045, 0.029, 0.068),
+      new THREE.Vector3(-0.053, -0.012, -0.018),
+      accentMetal,
+      0.0015,
+      1,
+      'kestrel-identity-plate',
     );
 
     // Octagonal free-float handguard, ribs, vents, heat-shield and rail hardware.
@@ -898,7 +966,7 @@ export class Rifle {
     // Barrel, gas block, muzzle brake and machined ports.
     cylinderPart(this.weapon, 0.012, 0.013, 0.31, new THREE.Vector3(0, 0.018, -0.665), darkMetal, 16, 'barrel');
     roundedPart(this.weapon, new THREE.Vector3(0.046, 0.056, 0.052), new THREE.Vector3(0, 0.02, -0.535), darkMetal, 0.005, 2, 'gas-block');
-    cylinderPart(this.weapon, 0.021, 0.019, 0.078, new THREE.Vector3(0, 0.018, -0.832), exposedMetal, 12, 'muzzle-brake');
+    cylinderPart(this.weapon, 0.021, 0.019, 0.078, new THREE.Vector3(0, 0.018, -0.832), railMetal, 12, 'muzzle-brake');
     cylinderPart(this.weapon, 0.012, 0.012, 0.084, new THREE.Vector3(0, 0.018, -0.837), darkMetal, 12, 'muzzle-bore');
     for (const side of [-1, 1]) {
       for (let i = 0; i < 2; i += 1) {
@@ -964,7 +1032,7 @@ export class Rifle {
     this.weapon.add(this.magazineMesh);
     const magBody = roundedPart(this.magazineMesh, new THREE.Vector3(0.072, 0.205, 0.104), new THREE.Vector3(0, -0.08, 0), polymer, 0.009, 3, 'curved-magazine-body');
     magBody.rotation.x = -0.08;
-    roundedPart(this.magazineMesh, new THREE.Vector3(0.081, 0.018, 0.116), new THREE.Vector3(0, -0.188, 0.012), darkMetal, 0.004, 2, 'magazine-baseplate');
+    roundedPart(this.magazineMesh, new THREE.Vector3(0.081, 0.018, 0.116), new THREE.Vector3(0, -0.188, 0.012), accentMetal, 0.004, 2, 'magazine-baseplate');
     for (const x of [-0.026, 0.026]) {
       roundedPart(this.magazineMesh, new THREE.Vector3(0.006, 0.15, 0.006), new THREE.Vector3(x, -0.08, -0.054), gunmetal, 0.002, 1, 'magazine-stamp-rib');
     }
@@ -977,25 +1045,46 @@ export class Rifle {
     optic.name = 'Aster-Holo-Optic';
     optic.position.set(0, 0.135, -0.045);
     this.weapon.add(optic);
-    roundedPart(optic, new THREE.Vector3(0.092, 0.032, 0.145), new THREE.Vector3(0, -0.015, 0), darkMetal, 0.006, 2, 'optic-base');
+    roundedPart(optic, new THREE.Vector3(0.086, 0.03, 0.138), new THREE.Vector3(0, -0.015, 0), darkMetal, 0.006, 2, 'optic-base');
     for (const side of [-1, 1]) {
-      roundedPart(optic, new THREE.Vector3(0.016, 0.095, 0.105), new THREE.Vector3(side * 0.044, 0.04, -0.005), gunmetal, 0.006, 2, 'optic-hood-side');
+      roundedPart(optic, new THREE.Vector3(0.014, 0.09, 0.1), new THREE.Vector3(side * 0.04, 0.04, -0.005), gunmetal, 0.005, 2, 'optic-hood-side');
     }
-    roundedPart(optic, new THREE.Vector3(0.092, 0.016, 0.105), new THREE.Vector3(0, 0.085, -0.005), gunmetal, 0.005, 2, 'optic-hood-top');
-    const frontGlass = new THREE.Mesh(new THREE.CircleGeometry(0.037, 24), opticGlass);
-    frontGlass.position.set(0, 0.045, -0.059);
-    frontGlass.rotation.x = 0;
-    frontGlass.name = 'optic-front-glass';
-    optic.add(frontGlass);
-    const rearGlass = frontGlass.clone();
-    rearGlass.position.z = 0.052;
-    rearGlass.rotation.y = Math.PI;
-    rearGlass.name = 'optic-rear-glass';
-    optic.add(rearGlass);
-    const dot = new THREE.Mesh(new THREE.RingGeometry(0.004, 0.005, 18), reticle);
-    dot.position.set(0, 0.045, 0.054);
+    roundedPart(optic, new THREE.Vector3(0.084, 0.014, 0.1), new THREE.Vector3(0, 0.084, -0.005), gunmetal, 0.004, 2, 'optic-hood-top');
+    // A single optical plane and flat, concentric bezels avoid the lumpy
+    // double-torus silhouette that appeared when both lens rims overlapped.
+    const sightGlass = new THREE.Mesh(new THREE.CircleGeometry(0.0315, 48), opticGlass);
+    sightGlass.position.set(0, 0.045, 0.048);
+    sightGlass.name = 'optic-sight-glass';
+    optic.add(sightGlass);
+    const lensBezel = new THREE.Mesh(
+      new THREE.RingGeometry(0.0315, 0.038, 64),
+      darkMetal,
+    );
+    lensBezel.position.set(0, 0.045, 0.0505);
+    lensBezel.name = 'optic-machined-bezel';
+    optic.add(lensBezel);
+    const lensAccent = new THREE.Mesh(
+      new THREE.RingGeometry(0.0366, 0.0375, 64),
+      railMetal,
+    );
+    lensAccent.position.set(0, 0.045, 0.051);
+    lensAccent.name = 'optic-bezel-highlight';
+    optic.add(lensAccent);
+    const lensGasket = new THREE.Mesh(
+      new THREE.RingGeometry(0.0303, 0.0316, 64),
+      rubber,
+    );
+    lensGasket.position.set(0, 0.045, 0.0515);
+    lensGasket.name = 'optic-lens-gasket';
+    optic.add(lensGasket);
+    const dot = new THREE.Mesh(new THREE.RingGeometry(0.0036, 0.0044, 48), reticle);
+    dot.position.set(0, 0.045, 0.052);
     dot.name = 'projected-reticle';
     optic.add(dot);
+    const centerDot = new THREE.Mesh(new THREE.CircleGeometry(0.0011, 24), reticle);
+    centerDot.position.set(0, 0.045, 0.0522);
+    centerDot.name = 'projected-reticle-center';
+    optic.add(centerDot);
     cylinderPart(optic, 0.013, 0.013, 0.012, new THREE.Vector3(0.055, 0.035, 0.012), darkMetal, 12, 'brightness-dial').rotation.y = Math.PI * 0.5;
     for (let i = 0; i < 5; i += 1) {
       roundedPart(optic, new THREE.Vector3(0.008, 0.025, 0.004), new THREE.Vector3(0.063, 0.035, -0.003 + i * 0.007), exposedMetal, 0.001, 1, 'dial-knurl');
@@ -1011,72 +1100,94 @@ export class Rifle {
     }
     roundedPart(this.weapon, new THREE.Vector3(0.004, 0.025, 0.082), new THREE.Vector3(-0.054, 0.018, 0), exposedMetal, 0.0015, 1, 'receiver-wear-plate');
 
-    this._buildHands(glove, sleeve, skin, rubber);
+    this._buildHands(glove, sleeve, rubber);
     this.weapon.traverse(setShadow);
   }
 
-  _buildHands(glove, sleeve, skin, rubber) {
+  _buildHands(glove, sleeve, rubber) {
     // Right sleeve and hand remain locked to the grip.
     const rightArm = new THREE.Group();
     rightArm.name = 'right-arm';
-    rightArm.position.set(0.105, -0.255, 0.28);
-    rightArm.rotation.set(-0.22, -0.16, -0.14);
+    rightArm.position.set(0.052, -0.13, 0.11);
+    rightArm.rotation.set(-0.12, -0.08, -0.08);
     this.weapon.add(rightArm);
-    const rightSleeve = cylinderPart(rightArm, 0.075, 0.09, 0.34, new THREE.Vector3(0.045, -0.18, 0.12), sleeve, 12, 'right-sleeve');
-    rightSleeve.rotation.set(-0.86, 0.18, 0.05);
-    roundedPart(rightArm, new THREE.Vector3(0.115, 0.065, 0.09), new THREE.Vector3(0, -0.025, 0.015), glove, 0.018, 3, 'right-palm');
-    roundedPart(rightArm, new THREE.Vector3(0.12, 0.035, 0.102), new THREE.Vector3(0.005, -0.075, 0.025), rubber, 0.009, 2, 'right-cuff');
+    const rightSleeve = cylinderPart(rightArm, 0.045, 0.058, 0.235, new THREE.Vector3(0.085, -0.195, -0.005), sleeve, 16, 'right-sleeve');
+    this.rightSleeve = rightSleeve;
+    rightSleeve.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(-0.6, 0.78, 0.38).normalize(),
+    );
+    roundedPart(rightArm, new THREE.Vector3(0.1, 0.062, 0.082), new THREE.Vector3(0.005, -0.038, 0.018), glove, 0.016, 3, 'right-palm');
+    roundedPart(rightArm, new THREE.Vector3(0.105, 0.032, 0.096), new THREE.Vector3(0.01, -0.102, 0.04), rubber, 0.009, 2, 'right-cuff');
 
-    const fingerGeometry = new THREE.CapsuleGeometry(0.013, 0.052, 4, 8);
-    for (let i = 0; i < 4; i += 1) {
-      const finger = new THREE.Mesh(fingerGeometry, glove);
-      finger.position.set(-0.039 + i * 0.026, -0.08 - i * 0.003, -0.005);
-      finger.rotation.set(0.12, 0.04, -0.22);
-      finger.name = `right-finger-${i + 1}`;
-      rightArm.add(finger);
+    const gripFingerGeometry = new THREE.CapsuleGeometry(0.0115, 0.032, 4, 8);
+    const gripTipGeometry = new THREE.CapsuleGeometry(0.0105, 0.026, 4, 8);
+    for (let i = 0; i < 3; i += 1) {
+      const proximal = new THREE.Mesh(gripFingerGeometry, glove);
+      proximal.position.set(-0.004, 0.004 - i * 0.035, -0.034);
+      proximal.rotation.set(0.08, 0.02, Math.PI * 0.5);
+      proximal.name = `right-grip-finger-${i + 1}-proximal`;
+      rightArm.add(proximal);
+      const distal = new THREE.Mesh(gripTipGeometry, glove);
+      distal.position.set(-0.043, 0.004 - i * 0.035, -0.014);
+      distal.rotation.set(Math.PI * 0.48, 0.08, 0.06);
+      distal.name = `right-grip-finger-${i + 1}-distal`;
+      rightArm.add(distal);
     }
     const triggerFinger = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.012, 0.064, 4, 8),
       glove,
     );
-    triggerFinger.position.set(-0.046, 0.006, -0.035);
-    triggerFinger.rotation.set(Math.PI * 0.48, 0.1, 0.2);
+    triggerFinger.position.set(-0.043, 0.04, -0.052);
+    triggerFinger.rotation.set(Math.PI * 0.49, 0.1, 0.12);
     triggerFinger.name = 'right-trigger-finger';
     rightArm.add(triggerFinger);
     const rightThumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, 0.058, 4, 8), glove);
-    rightThumb.position.set(0.046, -0.018, -0.036);
-    rightThumb.rotation.set(Math.PI * 0.43, 0, -0.5);
+    rightThumb.position.set(0.036, -0.008, -0.026);
+    rightThumb.rotation.set(Math.PI * 0.42, 0, -0.58);
     rightThumb.name = 'right-thumb';
     rightArm.add(rightThumb);
 
     // Left support hand wraps the underside and sides of the handguard.
     this.leftHand = new THREE.Group();
     this.leftHand.name = 'left-support-hand';
-    this.leftHand.position.set(-0.075, -0.012, -0.31);
-    this.leftHand.rotation.set(0.05, 0.02, -0.08);
+    this.leftHand.position.copy(LEFT_HAND_HOME);
+    this.leftHand.rotation.set(0.035, 0.01, -0.045);
     this.weapon.add(this.leftHand);
-    roundedPart(this.leftHand, new THREE.Vector3(0.108, 0.058, 0.12), new THREE.Vector3(0.01, -0.065, 0), glove, 0.018, 3, 'left-palm');
-    roundedPart(this.leftHand, new THREE.Vector3(0.13, 0.036, 0.112), new THREE.Vector3(0.01, -0.112, 0.03), rubber, 0.01, 2, 'left-cuff');
-    const leftSleeve = cylinderPart(this.leftHand, 0.075, 0.095, 0.38, new THREE.Vector3(-0.13, -0.23, 0.16), sleeve, 12, 'left-sleeve');
-    leftSleeve.rotation.set(-0.62, -0.32, -0.72);
+    roundedPart(this.leftHand, new THREE.Vector3(0.092, 0.048, 0.12), new THREE.Vector3(-0.018, -0.057, 0), glove, 0.016, 3, 'left-palm');
+    roundedPart(this.leftHand, new THREE.Vector3(0.105, 0.032, 0.105), new THREE.Vector3(-0.035, -0.103, 0.04), rubber, 0.009, 2, 'left-cuff');
+    const leftSleeve = cylinderPart(this.leftHand, 0.045, 0.058, 0.235, new THREE.Vector3(-0.105, -0.195, -0.005), sleeve, 16, 'left-sleeve');
+    this.leftSleeveMesh = leftSleeve;
+    leftSleeve.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0.6, 0.78, 0.38).normalize(),
+    );
 
-    const wrapGeometry = new THREE.CapsuleGeometry(0.014, 0.065, 4, 8);
+    const supportFingerGeometry = new THREE.CapsuleGeometry(0.012, 0.042, 4, 8);
+    const supportTipGeometry = new THREE.CapsuleGeometry(0.011, 0.032, 4, 8);
     for (let i = 0; i < 4; i += 1) {
-      const finger = new THREE.Mesh(wrapGeometry, glove);
-      finger.position.set(-0.032 + i * 0.027, -0.045, -0.048 + i * 0.011);
-      finger.rotation.set(Math.PI * 0.48, 0.08, -0.1 + i * 0.035);
-      finger.name = `left-finger-${i + 1}`;
-      this.leftHand.add(finger);
+      const z = -0.045 + i * 0.03;
+      const proximal = new THREE.Mesh(supportFingerGeometry, glove);
+      proximal.position.set(0.012, -0.051, z);
+      proximal.rotation.set(0.04, 0.02, -Math.PI * 0.5);
+      proximal.name = `left-support-finger-${i + 1}-proximal`;
+      this.leftHand.add(proximal);
+      const distal = new THREE.Mesh(supportTipGeometry, glove);
+      distal.position.set(0.05, -0.018, z);
+      distal.rotation.set(0.04, 0, -0.16);
+      distal.name = `left-support-finger-${i + 1}-distal`;
+      this.leftHand.add(distal);
     }
     const leftThumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.015, 0.073, 4, 8), glove);
-    leftThumb.position.set(0.058, 0.006, -0.02);
-    leftThumb.rotation.set(Math.PI * 0.39, 0.15, -0.58);
+    leftThumb.position.set(-0.044, -0.004, -0.032);
+    leftThumb.rotation.set(Math.PI * 0.43, 0.12, -0.32);
     leftThumb.name = 'left-thumb';
     this.leftHand.add(leftThumb);
 
-    // Small exposed wrist transitions prevent the hands reading as floating gloves.
-    roundedPart(rightArm, new THREE.Vector3(0.09, 0.025, 0.075), new THREE.Vector3(0.005, -0.101, 0.035), skin, 0.008, 2, 'right-wrist');
-    roundedPart(this.leftHand, new THREE.Vector3(0.098, 0.022, 0.08), new THREE.Vector3(0.008, -0.127, 0.045), skin, 0.008, 2, 'left-wrist');
+    // Fabric bridges between gloves and cuffs eliminate the former exposed
+    // wrist strip while preserving an anatomically continuous silhouette.
+    roundedPart(rightArm, new THREE.Vector3(0.086, 0.022, 0.07), new THREE.Vector3(0.008, -0.122, 0.05), sleeve, 0.007, 2, 'right-wrist-transition');
+    roundedPart(this.leftHand, new THREE.Vector3(0.09, 0.02, 0.075), new THREE.Vector3(-0.032, -0.126, 0.052), sleeve, 0.007, 2, 'left-wrist-transition');
   }
 
   _syncSnapshot() {

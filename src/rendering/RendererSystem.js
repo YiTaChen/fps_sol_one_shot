@@ -106,7 +106,7 @@ export class RendererSystem {
     }
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.04;
+    this.renderer.toneMappingExposure = 1.12;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.autoClear = false;
@@ -130,11 +130,11 @@ export class RendererSystem {
     this.sunLens = createSunLens();
     this.scene.add(this.sunLens);
 
-    this.hemi = new THREE.HemisphereLight(0xc5d9df, 0x4f4437, 1.55);
+    this.hemi = new THREE.HemisphereLight(0xcfe3e8, 0x75624d, 2.15);
     this.hemi.name = "SkyFill";
     this.scene.add(this.hemi);
 
-    this.sun = new THREE.DirectionalLight(0xffdfad, 3.2);
+    this.sun = new THREE.DirectionalLight(0xffdfad, 2.75);
     this.sun.name = "SunKey";
     this.sun.position.set(-38, 52, 31);
     this.sun.target.position.set(4, 0, -8);
@@ -149,18 +149,23 @@ export class RendererSystem {
     this.sun.shadow.normalBias = 0.025;
     this.scene.add(this.sun, this.sun.target);
 
-    this.warmBounce = new THREE.DirectionalLight(0xd18d5a, 0.38);
+    this.warmBounce = new THREE.DirectionalLight(0xe6a76f, 0.62);
     this.warmBounce.position.set(31, 12, -24);
     this.scene.add(this.warmBounce);
 
-    this.coolFill = new THREE.DirectionalLight(0x87b7ca, 0.24);
+    this.coolFill = new THREE.DirectionalLight(0x9ccfe0, 0.72);
     this.coolFill.position.set(-20, 18, -25);
     this.scene.add(this.coolFill);
 
-    const viewKey = new THREE.DirectionalLight(0xffdfbd, 2.8);
-    viewKey.position.set(-2, 4, 3);
-    const viewFill = new THREE.HemisphereLight(0xc7d9e0, 0x5b3e2c, 1.5);
-    this.viewScene.add(viewKey, viewFill);
+    const viewKey = new THREE.DirectionalLight(0xffe4c4, 4.6);
+    viewKey.position.set(-2.4, 3.6, 4.2);
+    const viewFill = new THREE.HemisphereLight(0xd8edf2, 0x78614d, 2.35);
+    const viewRim = new THREE.DirectionalLight(0x8fcfe6, 2.1);
+    viewRim.position.set(3.2, 1.4, -2.8);
+    const viewBounce = new THREE.DirectionalLight(0xf0a86c, 1.15);
+    viewBounce.position.set(2.2, -1.1, 2.6);
+    const viewAmbient = new THREE.AmbientLight(0x8a9695, 0.78);
+    this.viewScene.add(viewKey, viewFill, viewRim, viewBounce, viewAmbient);
   }
 
   installPostProcessing() {
@@ -197,7 +202,7 @@ export class RendererSystem {
       this.quality.shadowMap,
       this.quality.shadowMap,
     );
-    this.scene.fog.density = 2.25 / this.quality.fogFar;
+    this.scene.fog.density = 1.18 / this.quality.fogFar;
     this.resize();
     return this.quality;
   }

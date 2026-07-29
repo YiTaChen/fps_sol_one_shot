@@ -326,9 +326,9 @@ export class EnemyDirector {
       const visualVariant = randomInt(visualStream, 0, 4);
       const rig = createEnemySoldier(id, visualVariant, this.sharedAssets);
       rig.root.position.copy(spawn.position);
-      rig.root.position.y += 0.06;
+      rig.root.position.y += 0.015;
       rig.root.rotation.y = spawn.yaw;
-      rig.setGround(spawn.position.y + 0.06);
+      rig.setGround(spawn.position.y + 0.015);
       this.root.add(rig.root);
 
       const enemyStream = getRawStream(this.rngService, `enemy-ai:${id}`, this.seed);
@@ -384,7 +384,7 @@ export class EnemyDirector {
         renderAim: 0,
         renderFire: false,
         groundTimer: id * 0.02,
-        groundY: spawn.position.y + 0.06,
+        groundY: spawn.position.y + 0.015,
         deathTime: 0,
         deathTilt: randomRange(enemyStream, -1, 1),
         collider: {
@@ -1080,7 +1080,7 @@ export class EnemyDirector {
     if (!point) return;
     const normalY = Number(groundHit?.normal?.y ?? groundHit?.face?.normal?.y ?? 1);
     if (normalY < 0.45) return;
-    enemy.groundY = point.y + 0.06;
+    enemy.groundY = point.y + 0.015;
     enemy.rig.root.position.y = THREE.MathUtils.lerp(
       enemy.rig.root.position.y,
       enemy.groundY,

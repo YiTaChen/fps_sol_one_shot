@@ -380,11 +380,11 @@ export class Effects {
     this._geometries.push(particleGeometry);
     this._materials.push(particleMaterial);
 
-    const tracerGeometry = new THREE.CylinderGeometry(0.004, 0.008, 1, 5, 1, true);
+    const tracerGeometry = new THREE.CylinderGeometry(0.002, 0.004, 1, 6, 1, true);
     const tracerMaterial = new THREE.MeshBasicMaterial({
       color: 0xffc170,
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.74,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       toneMapped: false,
@@ -415,7 +415,7 @@ export class Effects {
     this._geometries.push(decalGeometry);
     this._materials.push(decalMaterial);
 
-    const shellGeometry = new THREE.CylinderGeometry(0.005, 0.0058, 0.031, 8, 1, false);
+    const shellGeometry = new THREE.CylinderGeometry(0.0075, 0.0085, 0.042, 10, 1, false);
     const shellMaterial = new THREE.MeshStandardMaterial({
       color: 0xc89742,
       metalness: 0.88,
@@ -489,7 +489,7 @@ export class Effects {
     const flash = this._claimTimed(this.flashes, MAX_FLASHES);
     flash.active = true;
     flash.age = 0;
-    flash.life = 0.055;
+    flash.life = 0.11;
     flash.group.visible = true;
 
     flash.group.position.copy(position);
@@ -503,21 +503,21 @@ export class Effects {
     const lightSlot = this._claimTimed(this.flashLights, MAX_FLASH_LIGHTS);
     lightSlot.active = true;
     lightSlot.age = 0;
-    lightSlot.life = 0.048;
+    lightSlot.life = 0.095;
     lightSlot.light.position.copy(position);
     lightSlot.light.intensity = 3.8;
     lightSlot.light.distance = 4.4;
 
     POINT.copy(position).addScaledVector(direction, 0.05);
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       this._spawnParticle({
         position: POINT,
         normal: direction,
         color: 0x69645b,
         speed: 0.28 + randomFloat(this.rng) * 0.25,
         life: 0.4 + randomFloat(this.rng) * 0.25,
-        startSize: 0.035,
-        endSize: 0.16,
+        startSize: 0.05,
+        endSize: 0.22,
         gravity: -0.04,
         drag: 2.8,
         kind: 4,
@@ -532,9 +532,9 @@ export class Effects {
     const tracer = this._claimTimed(this.tracers, this.tracerLimit);
     tracer.active = true;
     tracer.age = 0;
-    tracer.life = kind === 'enemy' ? 0.085 : 0.07;
+    tracer.life = kind === 'enemy' ? 0.12 : 0.105;
     SEGMENT.subVectors(b, a);
-    const length = Math.min(32, SEGMENT.length());
+    const length = Math.min(22, SEGMENT.length());
     if (length <= 0.001) {
       tracer.active = false;
       return false;
@@ -578,8 +578,9 @@ export class Effects {
         this._burst(POINT, NORMAL, 13, 0x9e774f, 0.85, 0.9, 0.07, 0.24, 4, 0.08, 1.0);
         break;
       case 'flesh':
-        this._burst(POINT, NORMAL, 9, 0x9d2728, 1.5, 0.58, 0.045, 0.012, 3, 1.15, 0.82);
-        this._burst(POINT, NORMAL, 3, 0x68191c, 0.45, 0.68, 0.06, 0.15, 4, 0.04, 0.9);
+        this._burst(POINT, NORMAL, 14, 0xb33132, 1.7, 0.62, 0.066, 0.015, 3, 1.15, 0.86);
+        this._burst(POINT, NORMAL, 5, 0x6f2023, 0.52, 0.76, 0.085, 0.22, 4, 0.04, 0.94);
+        this._burst(POINT, NORMAL, 5, 0xe2c4a4, 1.15, 0.42, 0.036, 0.009, 2, 0.7, 0.9);
         break;
       case 'fabric':
         this._burst(POINT, NORMAL, 6, 0x8c8171, 0.56, 0.7, 0.045, 0.14, 4, 0.04, 0.9);

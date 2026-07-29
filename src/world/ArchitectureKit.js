@@ -681,6 +681,84 @@ export class ArchitectureKit {
           _local.set(spec.width * 0.08, 3.06, front + 0.3),
           { module: 'fascia-sign' },
         );
+        this.addInstance(
+          spec,
+          'ceramic',
+          _scale.set(spec.width * 0.96, 0.18, 0.22),
+          _local.set(0, FLOOR_HEIGHT + 0.03, front + 0.15),
+          { module: 'coping' },
+        );
+        for (const x of [-spec.width * 0.5 + 0.26, spec.width * 0.5 - 0.26]) {
+          this.addInstance(
+            spec,
+            'concreteAggregate',
+            _scale.set(0.42, Math.min(top, FLOOR_HEIGHT) + 0.18, 0.42),
+            _local.set(x, Math.min(top, FLOOR_HEIGHT) * 0.5, front + 0.08),
+            { module: 'corner-pier' },
+          );
+          this.addInstance(
+            spec,
+            'ceramic',
+            _scale.set(0.5, 0.36, 0.48),
+            _local.set(x, 0.38, front + 0.11),
+            { module: 'foundation' },
+          );
+        }
+        for (let tab = -5; tab <= 5; tab += 1) {
+          this.addInstance(
+            spec,
+            tab % 2 === 0 ? 'fabric' : 'plasterOchre',
+            _scale.set(spec.width * 0.052, 0.34, 0.08),
+            _local.set(
+              spec.width * 0.08 + tab * spec.width * 0.056,
+              awningY - 0.14,
+              front + 1.92,
+            ),
+            {
+              localEuler: new THREE.Euler(0.08, 0, tab * 0.004),
+              module: 'awning',
+            },
+          );
+        }
+        for (const x of [-spec.width * 0.22, spec.width * 0.38]) {
+          this.addInstance(
+            spec,
+            'bareMetal',
+            _scale.set(0.065, 0.065, 1.55),
+            _local.set(x, 2.62, front + 0.82),
+            {
+              localEuler: new THREE.Euler(0.18, 0, 0),
+              module: 'awning',
+            },
+          );
+          this.addInstance(
+            spec,
+            'bareMetal',
+            _scale.set(0.055, 0.72, 0.055),
+            _local.set(x, 2.42, front + 0.34),
+            {
+              localEuler: new THREE.Euler(0, 0, 0.48),
+              module: 'awning',
+            },
+          );
+        }
+        this.addInstance(
+          spec,
+          'paintedMetal',
+          _scale.set(0.72, 1.08, 0.09),
+          _local.set(-spec.width * 0.39, 2.04, front + 0.52),
+          {
+            localEuler: new THREE.Euler(0, -0.12, -0.035),
+            module: 'blade-sign',
+          },
+        );
+        this.addInstance(
+          spec,
+          'lamp',
+          _scale.set(0.42, 0.1, 0.035),
+          _local.set(-spec.width * 0.39, 2.08, front + 0.59),
+          { module: 'blade-sign' },
+        );
         break;
       }
       case 'corrugatedWorkshop': {

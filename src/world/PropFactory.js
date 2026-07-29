@@ -287,7 +287,17 @@ export class PropFactory {
         for (let shelf = 0; shelf < 4; shelf += 1) {
           this.box(origin, yaw, s, 'wood', [0, 0.22 + shelf * 0.52, 0], [1.65, 0.09, 0.54]);
           for (let item = -2; item <= 2; item += 1) {
-            this.box(origin, yaw, s, item & 1 ? 'polymer' : 'paintedMetal', [item * 0.27, 0.36 + shelf * 0.52, 0], [0.16, 0.24, 0.22]);
+            const palette = ['ceramic', 'fabric', 'plasterOchre', 'foliage', 'plasterBlue'];
+            this.box(
+              origin,
+              yaw,
+              s,
+              palette[(item + 2 + shelf) % palette.length],
+              [item * 0.27, 0.36 + shelf * 0.52, 0],
+              [0.16, 0.24 + ((item + shelf) & 1) * 0.05, 0.22],
+              [0, item * 0.025, 0],
+              { radius: 0.075 },
+            );
           }
         }
         break;

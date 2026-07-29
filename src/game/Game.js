@@ -8,7 +8,7 @@ import {
 } from "../core/index.js";
 import { AudioSystem } from "../audio/AudioSystem.js";
 import { Effects } from "../effects/Effects.js";
-import { EnemyDirector } from "../enemies/EnemyDirector.js";
+import { EnemyDirector, EnemyState } from "../enemies/EnemyDirector.js";
 import { MaterialLibrary } from "../materials/MaterialLibrary.js";
 import { PhysicsWorld } from "../physics/PhysicsWorld.js";
 import { PlayerController } from "../player/PlayerController.js";
@@ -21,6 +21,8 @@ const FIXED_STEP = 1 / 60;
 const _damageDirection = new THREE.Vector3(0, 0, 1);
 const _capturePosition = new THREE.Vector3();
 const _captureTarget = new THREE.Vector3();
+const _captureDirection = new THREE.Vector3();
+const _captureSide = new THREE.Vector3();
 const _captureQuaternion = new THREE.Quaternion();
 
 const FALLBACK_CAPTURE_POSES = Object.freeze({
@@ -494,9 +496,17 @@ export class Game {
     this.state.phase = isActive ? "playing" : "capture";
     this.player.setEnabled(isActive);
     this.rifle.setEnabled(isActive || isWeapon);
-    this.rifle.setADS(name === "weapon-ads");
-    if (name === "weapon-ads") this.rifle.ads = 1;
-    if (name === "weapon-hip") this.rifle.ads = 0;
+    const wantsADS = name === "weapon-ads";
+    this.rifle.setADS(wantsADS);
+    for (const enemy of this.enemies.enemies) {
+      enemy.rig.root.visible = !isWeapon;
+    }
+    if (isWeapon) {
+      this.rifle.ads = wantsADS ? 1 : 0;
+      for (let frame = 0; frame < 72; frame += 1) {
+        this.rifle.update(FIXED_STEP, 1);
+      }
+    }
 
     if (isActive) {
       this.captureOverride = null;
@@ -516,6 +526,46 @@ export class Game {
           _capturePosition,
           yaw,
         );
+
+        const heroEnemy = this.enemies.enemies.find((entry) => entry.alive);
+        if (heroEnemy) {
+          _captureDirection.set(directionX, 0, directionZ);
+          if (_captureDirection.lengthSq() < 0.001) {
+            _captureDirection.set(1, 0, 0);
+          } else {
+            _captureDirection.normalize();
+          }
+          _captureSide
+            .set(-_captureDirection.z, 0, _captureDirection.x)
+            .multiplyScalar(0.08);
+          heroEnemy.rig.root.position
+            .copy(this.player.position)
+            .addScaledVector(_captureDirection, 8.6)
+            .add(_captureSide);
+          heroEnemy.rig.root.position.y = 0.015;
+          heroEnemy.groundY = 0.015;
+          heroEnemy.rig.lastGroundY = 0.015;
+          heroEnemy.destination.copy(heroEnemy.rig.root.position);
+          _captureDirection
+            .subVectors(this.player.position, heroEnemy.rig.root.position)
+            .setY(0)
+            .normalize();
+          heroEnemy.rig.root.rotation.y = Math.atan2(
+            -_captureDirection.x,
+            -_captureDirection.z,
+          );
+          heroEnemy.alerted = true;
+          heroEnemy.detection = 1;
+          heroEnemy.canSeePlayer = true;
+          heroEnemy.reactionTimer = 0;
+          heroEnemy.burstRemaining = 4;
+          heroEnemy.shotTimer = 0;
+          heroEnemy.state = EnemyState.FIRE;
+          heroEnemy.renderAim = 1;
+          for (let frame = 0; frame < 72; frame += 1) {
+            heroEnemy.rig.animate(FIXED_STEP, 0, 1, frame > 64, 0, false);
+          }
+        }
       }
       this.enemies.forceAlert(this.player.position);
       this.ui.setScreen("playing");
@@ -523,13 +573,30 @@ export class Game {
       this.ui.setScreen("capture");
       if (name === "enemy") {
         const enemy = this.enemies.enemies.find((entry) => entry.alive);
-        if (enemy && !pose.position) {
+        if (enemy) {
+          for (const entry of this.enemies.enemies) {
+            entry.rig.root.visible = entry === enemy;
+          }
           this.captureOverride.position
             .copy(enemy.rig.root.position)
-            .add(new THREE.Vector3(4.8, 2.05, 7.2));
+            .add(new THREE.Vector3(2.65, 1.62, 3.2));
           this.captureOverride.target
             .copy(enemy.rig.root.position)
-            .add(new THREE.Vector3(0, 1.25, 0));
+            .add(new THREE.Vector3(0, 1.18, 0));
+          this.captureOverride.fov = 46;
+          _captureDirection
+            .subVectors(this.captureOverride.position, enemy.rig.root.position)
+            .setY(0)
+            .normalize();
+          enemy.rig.root.rotation.y = Math.atan2(
+            -_captureDirection.x,
+            -_captureDirection.z,
+          ) + 0.32;
+          enemy.renderMotion = 0.16;
+          enemy.renderAim = 1;
+          for (let frame = 0; frame < 84; frame += 1) {
+            enemy.rig.animate(FIXED_STEP, 0.16, 1, false, 0, false);
+          }
         }
       }
       this.applyCaptureCamera();

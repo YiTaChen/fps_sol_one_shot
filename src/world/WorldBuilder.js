@@ -153,6 +153,16 @@ const BUILDING_SPECS = Object.freeze([
 const HERO_PROP_PLACEMENTS = Object.freeze([
   ['market-stall', -27, 0.02, -3.9, 0, 1],
   ['display-shelf', -40.5, 0.02, -10.5, Math.PI, 0.9],
+  ['produce-crate', -45.15, 0.02, -5.15, 0.08, 0.9],
+  ['produce-basket', -40.75, 0.02, -5.1, -0.1, 0.9],
+  ['sack-stack', -35.25, 0.02, -5.15, Math.PI * 0.5, 0.78],
+  ['hand-cart', -32.45, 0.02, -4.95, 0.12, 0.82],
+  ['planter', -43.6, 0.02, 4.85, 0, 0.9],
+  ['bench', -40.8, 0.02, 4.75, Math.PI, 0.86],
+  ['sandbag-pile', -36.9, 0.02, 2.45, 0.12, 0.9],
+  ['road-barrier', -31.4, 0.02, -1.9, 0.08, 0.92],
+  ['traffic-cone', -34.0, 0.02, 3.75, -0.18, 0.9],
+  ['cable-spool', -28.7, 0.02, 4.35, 0.14, 0.86],
   ['shipping-crate', 25.5, 0.02, -4.1, 0.2, 1],
   ['produce-crate', -24.5, 0.02, -4.3, -0.2, 1],
   ['pallet', 30, 0.02, -28.5, 0.1, 1],
@@ -202,6 +212,9 @@ const INTERIOR_RECIPES = Object.freeze({
     ['produce-basket', 1.8, -4.6, -0.2, 0.85],
     ['sack-stack', 4.1, 1.8, Math.PI * 0.5, 0.8],
     ['stool', -1.1, 1.5, 0, 0.85],
+    ['produce-crate', -2.6, 3.55, -0.08, 0.88],
+    ['produce-basket', -1.45, 3.5, 0.12, 0.86],
+    ['fabric-bale', 5.35, 2.85, Math.PI * 0.5, 0.78],
   ],
   'kestrel-workshop': [
     ['workbench', 3.6, -4.7, Math.PI, 0.9],
@@ -380,11 +393,11 @@ export class WorldBuilder {
     });
     const enemySpawns = this.createEnemySpawns();
     const capturePoses = Object.freeze({
-      wideStreet: capturePose('wide-street', [-43, 3.4, 4.3], [5, 2.6, 0], 61),
-      closeFacade: capturePose('close-facade', [-26, 2.25, 1.4], [-38.5, 3.2, -6.1], 54),
-      enterableInterior: capturePose('enterable-interior', [-40.5, 1.62, -9.2], [-37.6, 1.45, -15], 64),
-      hipFire: capturePose('hip-fire', [-39, 1.7, 2], [-8, 1.45, -1], 68),
-      ads: capturePose('ads', [-25, 1.7, 2], [21, 1.55, 0], 52),
+      wideStreet: capturePose('wide-street', [-46, 1.84, -3.2], [9, 1.48, -0.15], 66),
+      closeFacade: capturePose('close-facade', [-37.1, 1.8, -2.15], [-40, 2.0, -6.15], 68),
+      enterableInterior: capturePose('enterable-interior', [-37.1, 1.55, -6.75], [-37.25, 1.15, -13], 70),
+      hipFire: capturePose('hip-fire', [-37.1, 1.55, -6.75], [-37.25, 1.15, -13], 70),
+      ads: capturePose('ads', [-37.1, 1.55, -6.75], [-37.25, 1.15, -13], 62),
       enemy: capturePose('enemy', [23.5, 1.72, 5], [31, 1.35, -2], 47),
       activeCombat: capturePose('active-combat', [-8, 2.0, 5], [14, 1.55, -2], 60),
     });
@@ -648,6 +661,7 @@ export class WorldBuilder {
     const partitionZ = -spec.depth * 0.12;
     const doorWidth = 1.4;
     const gapX = layoutRng.range(-spec.width * 0.18, spec.width * 0.18);
+    building.interior.partitionGapX = gapX;
     const leftWidth = gapX - doorWidth * 0.5 + spec.width * 0.5 - 0.42;
     const rightStart = gapX + doorWidth * 0.5;
     const rightWidth = spec.width * 0.5 - 0.42 - rightStart;
@@ -689,7 +703,7 @@ export class WorldBuilder {
     }
   }
 
-  dressInteriors() {
+  dressInteriors(dressingRng) {
     for (const building of this.architecture.buildings) {
       if (!building.spec.enterable) {
         continue;
@@ -708,6 +722,10 @@ export class WorldBuilder {
               ? 'wood'
               : undefined,
         });
+      }
+
+      if (building.spec.id === 'saffron-arcade') {
+        this.dressSaffronArcade(building, dressingRng);
       }
 
       for (let lightIndex = -1; lightIndex <= 1; lightIndex += 2) {
@@ -733,6 +751,205 @@ export class WorldBuilder {
         );
       }
     }
+  }
+
+  dressSaffronArcade(building, rng) {
+    const { spec } = building;
+    const addBox = (material, size, position, options = {}) => {
+      this.architecture.addInstance(
+        spec,
+        material,
+        new THREE.Vector3(...size),
+        new THREE.Vector3(...position),
+        {
+          localEuler: options.rotation
+            ? new THREE.Euler(...options.rotation)
+            : undefined,
+          module: options.module ?? 'storefront',
+          radius: options.radius ?? 0.025,
+        },
+      );
+    };
+    const addCylinder = (material, size, position, options = {}) => {
+      this.architecture.addCylinder(
+        spec,
+        material,
+        new THREE.Vector3(...size),
+        new THREE.Vector3(...position),
+        {
+          localEuler: options.rotation
+            ? new THREE.Euler(...options.rotation)
+            : undefined,
+          module: options.module ?? 'storefront',
+          radialSegments: options.radialSegments ?? 9,
+        },
+      );
+    };
+
+    // A recognizable service counter: recessed front panels, timber worktop,
+    // register, weighing scale and a low impulse-buy shelf.
+    addBox('paintedMetal', [3.35, 0.78, 0.72], [1.72, 0.43, 3.05]);
+    addBox('wood', [3.58, 0.12, 0.94], [1.72, 0.88, 3.02]);
+    addBox('wood', [3.22, 0.58, 0.075], [1.72, 0.48, 3.43]);
+    for (const x of [0.25, 1.25, 2.25, 3.2]) {
+      addBox('bareMetal', [0.045, 0.58, 0.1], [x, 0.48, 3.48]);
+    }
+    addBox('polymer', [0.48, 0.21, 0.38], [2.72, 1.055, 2.98], {
+      rotation: [-0.08, -0.1, 0],
+    });
+    addBox('glass', [0.38, 0.2, 0.035], [2.72, 1.13, 3.19], {
+      rotation: [-0.12, 0, 0],
+    });
+    addBox('bareMetal', [0.42, 0.08, 0.32], [0.75, 1.01, 3.0]);
+    addCylinder('ceramic', [0.46, 0.08, 0.46], [0.75, 1.08, 3.0], {
+      radialSegments: 14,
+    });
+    addBox('wood', [2.7, 0.09, 0.34], [1.6, 0.18, 3.55]);
+    for (let cubby = 0; cubby < 5; cubby += 1) {
+      addBox(
+        cubby % 2 === 0 ? 'fabric' : 'ceramic',
+        [0.38, 0.22, 0.28],
+        [0.62 + cubby * 0.49, 0.34, 3.57],
+        { rotation: [0, rng.range(-0.08, 0.08), 0], radius: 0.07 },
+      );
+    }
+
+    // Slatted produce bins and individually modelled merchandise create a
+    // readable market silhouette without adding independent draw calls.
+    const producePalette = ['foliage', 'plasterOchre', 'fabric', 'ceramic'];
+    for (let bin = 0; bin < 3; bin += 1) {
+      const binX = -2.15 + bin * 1.15;
+      addBox('wood', [0.98, 0.38, 0.76], [binX, 0.25, 1.55], {
+        rotation: [0.05, (bin - 1) * 0.045, 0],
+        radius: 0.065,
+      });
+      addBox('bareMetal', [0.92, 0.035, 0.62], [binX, 0.48, 1.52], {
+        rotation: [0.08, 0, 0],
+      });
+      for (let item = 0; item < 6; item += 1) {
+        const angle = (item / 6) * Math.PI * 2;
+        addCylinder(
+          producePalette[(bin + item) % producePalette.length],
+          [0.16, 0.14 + (item % 2) * 0.04, 0.16],
+          [
+            binX + Math.cos(angle) * 0.25,
+            0.57 + (item % 3) * 0.035,
+            1.52 + Math.sin(angle) * 0.2,
+          ],
+          {
+            rotation: [0, 0, Math.PI * 0.5],
+            radialSegments: 8,
+          },
+        );
+      }
+    }
+
+    // Wall merchandising: deep shelves, bright fabric rolls, hooks, price
+    // boards and construction rails break the otherwise blank side wall.
+    for (const y of [0.78, 1.38, 1.98]) {
+      addBox('wood', [0.62, 0.09, 3.45], [6.75, y, 1.05]);
+    }
+    for (const z of [-0.25, 2.2]) {
+      addBox('bareMetal', [0.08, 2.05, 0.08], [6.63, 1.25, z]);
+    }
+    for (let roll = 0; roll < 7; roll += 1) {
+      addCylinder(
+        roll % 3 === 0 ? 'fabric' : roll % 3 === 1 ? 'plasterBlue' : 'plasterOchre',
+        [0.19, 1.25 + (roll % 2) * 0.22, 0.19],
+        [6.38, 1.0, -0.2 + roll * 0.42],
+        {
+          rotation: [0, 0, (roll - 3) * 0.018],
+          radialSegments: 10,
+        },
+      );
+    }
+    addBox('wood', [3.25, 0.7, 0.08], [3.15, 1.82, -1.78], {
+      module: 'fascia-sign',
+    });
+    for (let stripe = 0; stripe < 4; stripe += 1) {
+      addBox(
+        stripe % 2 ? 'ceramic' : 'plasterOchre',
+        [0.58, 0.075, 0.035],
+        [2.25 + stripe * 0.6, 1.82 + (stripe % 2) * 0.12, -1.72],
+        { module: 'fascia-sign' },
+      );
+    }
+    addBox('paintedMetal', [1.42, 0.54, 0.075], [-5.65, 1.62, 0.7], {
+      rotation: [0, Math.PI * 0.5, 0],
+      module: 'blade-sign',
+    });
+    addBox('lamp', [0.78, 0.075, 0.035], [-5.6, 1.62, 0.7], {
+      rotation: [0, Math.PI * 0.5, 0],
+      module: 'blade-sign',
+    });
+
+    // A secondary timber ceiling lattice, utility rail and pendant fixtures
+    // reveal actual construction depth beneath the tiled upper-floor slab.
+    for (const z of [-0.75, 1.1, 2.95, 4.8, 6.35]) {
+      addBox('wood', [14.7, 0.11, 0.16], [0, 2.91, z], {
+        module: 'roof-screen',
+      });
+    }
+    for (const x of [-6.65, 0, 6.65]) {
+      addBox('bareMetal', [0.12, 0.1, 7.35], [x, 2.85, 2.55], {
+        module: 'roof-screen',
+      });
+    }
+    for (const [x, z] of [[-1.8, 2.2], [2.4, 1.2], [4.85, 4.25]]) {
+      addCylinder('bareMetal', [0.028, 0.62, 0.028], [x, 2.58, z], {
+        radialSegments: 6,
+        module: 'wall-lamp',
+      });
+      addCylinder('lamp', [0.28, 0.16, 0.28], [x, 2.25, z], {
+        radialSegments: 12,
+        module: 'wall-lamp',
+      });
+      addBox('paintedMetal', [0.38, 0.08, 0.38], [x, 2.34, z], {
+        module: 'wall-lamp',
+      });
+    }
+
+    // Exterior service hardware and layered signage give the hero facade
+    // readable construction at the required 3–5 metre review distance.
+    addBox('paintedMetal', [2.75, 0.66, 0.12], [2.15, 2.05, 8.18], {
+      module: 'fascia-sign',
+      radius: 0.055,
+    });
+    addBox('wood', [2.48, 0.46, 0.05], [2.15, 2.05, 8.27], {
+      module: 'fascia-sign',
+      radius: 0.035,
+    });
+    for (let mark = 0; mark < 5; mark += 1) {
+      addBox(
+        mark % 2 ? 'ceramic' : 'plasterOchre',
+        [0.28 + (mark % 2) * 0.16, 0.055, 0.035],
+        [1.28 + mark * 0.42, 2.08 + (mark % 2) * 0.13, 8.32],
+        { module: 'fascia-sign', radius: 0.018 },
+      );
+    }
+    addCylinder('bareMetal', [0.07, 2.65, 0.07], [5.68, 1.48, 8.18], {
+      radialSegments: 12,
+      module: 'drainage',
+    });
+    addCylinder('bareMetal', [0.07, 0.72, 0.07], [5.38, 2.77, 8.18], {
+      rotation: [0, 0, Math.PI * 0.5],
+      radialSegments: 12,
+      module: 'drainage',
+    });
+    addBox('paintedMetal', [0.52, 0.68, 0.18], [5.18, 1.18, 8.22], {
+      module: 'electrical-box',
+      radius: 0.045,
+    });
+    for (let vent = 0; vent < 4; vent += 1) {
+      addBox('bareMetal', [0.34, 0.025, 0.035], [5.18, 1.02 + vent * 0.105, 8.33], {
+        module: 'vent',
+        radius: 0.008,
+      });
+    }
+    addBox('bareMetal', [4.5, 0.035, 0.035], [3.45, 2.78, 8.28], {
+      module: 'cable-run',
+      radius: 0.012,
+    });
   }
 
   placeHeroProps() {
