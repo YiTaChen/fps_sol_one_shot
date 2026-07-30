@@ -9,7 +9,10 @@ synthesized spatial audio.
 **[See how it was built](#ai-agent-assisted-development)** ·
 **[Review the evidence](#validation-and-evidence)**
 
-![Active combat in Ash Market, showing the rifle, enemy soldier, tactical HUD, muzzle effects, and code-generated industrial district](artifacts/captures/07-active-combat.png)
+<p align="center">
+  <img src="artifacts/demo/gameplay-preview.gif" width="720" alt="Gameplay preview showing movement, aiming, and combat in Ash Market">
+  <br><sub><b>Gameplay preview:</b> deploy into Ash Market, track hostiles, and engage in real-time tactical combat.</sub>
+</p>
 
 The runtime downloads no models, textures, images, or audio samples. Buildings,
 interiors, props, PBR maps, the rifle, hands, soldiers, effects, ambience, and
@@ -73,6 +76,12 @@ competitive progression would require a backend.
 ## Visual tour
 
 <table>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="artifacts/captures/07-active-combat.png" alt="Active combat in Ash Market, showing the rifle, enemy soldier, tactical HUD, muzzle effects, and code-generated industrial district">
+      <br><sub><b>Active combat:</b> tactical HUD, muzzle effects, reactive enemies, and the code-generated industrial district.</sub>
+    </td>
+  </tr>
   <tr>
     <td width="50%">
       <img src="artifacts/captures/01-wide-street.png" alt="A wide Ash Market street showing the generated industrial architecture, market stalls, signs, fog, and lighting">
