@@ -15,14 +15,30 @@ and sound effects are generated from code.
 
 ## Objective
 
-Deploy into Ash Market and neutralize the six-hostile objective before your
-health reaches zero. Seven active soldiers populate the district. They patrol,
-investigate, pursue, use cover, reposition, aim, fire, react to hits, and reload.
+Deploy into Ash Market and neutralize every hostile before your health reaches
+zero. Operation 1 contains seven soldiers. Clearing it unlocks an endless
+sequence on the same map, with `7 × operation` total enemies and newly seeded
+spawn positions. Up to 12 are active at once; later-operation reinforcements
+enter after casualties so the browser remains playable as the total grows.
+
+Soldiers patrol, investigate sound, pursue, use cover, reposition, aim, fire,
+react to hits, and reload. Unaware vision is limited to a 35° half-angle and a
+38 m range with line-of-sight occlusion. A newly spotted player receives a
+deterministic 2–4 second reaction window. Enemy aim turns and tracks with
+inertia, while angular spread, burst bloom, suppression, and player movement
+produce both hits and misses instead of instant perfect tracking.
 
 Combat supports projectile travel, gravity, hit zones, headshots, penetrable
 materials, shallow metal ricochets, surface-specific impacts, decals, particles,
-tracers, hit markers, and directional damage feedback. Victory, defeat, pause,
-resume, and deterministic restart are all playable.
+tracers, hit markers, and directional damage feedback. Fallen soldiers buckle,
+fall fully to the ground, linger, and despawn. Victory, next operation, defeat,
+pause, resume, and deterministic current-operation restart are all playable.
+
+The highest cleared operation is stored in versioned browser `localStorage` and
+shown on the start screen only after the first clear. The value is treated as
+untrusted input and validated before display or use. Like every client-only
+save, it can still be edited by the browser owner; tamper-proof competitive
+progress would require a server-authoritative account system.
 
 ## Controls
 
@@ -38,10 +54,10 @@ Click **Deploy** first to enable pointer-lock aiming and browser audio.
 | Hold `Shift` while moving forward | Sprint |
 | Hold `Ctrl` or `C` | Crouch |
 | Sprint + `Ctrl` / `C` | Slide |
-| `Space` | Jump; mantle at a valid ledge |
+| `Space` | Jump; mantle at a valid ledge up to 0.44 m |
 | `Q` / `E` | Protected lean left / right |
 | `Esc` | Release pointer lock and pause |
-| Menu buttons | Resume, restart, or change quality |
+| Menu buttons | Resume, restart, advance operation, or change quality |
 
 ## Requirements and installation
 
@@ -127,14 +143,19 @@ Important properties:
 - World and first-person weapon render through separate scenes and cameras.
 - Sibling systems communicate through an event bus.
 - Named RNG streams isolate world dressing, AI, spread, effects, and audio.
+- Each operation derives a deterministic combat seed without rebuilding the
+  authored world.
 - Restart resets the match without recreating the renderer, AudioContext, or
   global listeners.
+- Capsule stepping is limited to 0.44 m (roughly one quarter of standing
+  height); vertical collision resolves only when a floor or ceiling plane was
+  actually crossed.
 - Hot systems reuse cached geometry/materials and fixed effect pools.
 
 The runtime catalogs 12 building specifications, 8 façade families, 4
 enterable interiors, 34 architectural modules, 40 prop archetypes, 19 material
-families, and 7 active enemies. See [ARCHITECTURE.md](ARCHITECTURE.md) for the
-full contract.
+families, and a 12-enemy active-combat cap. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for the full contract.
 
 ## Procedural assets
 
@@ -162,14 +183,16 @@ npm run profile
 
 ### Browser smoke suite
 
-`npm test` runs 18 browser-level checks covering boot, test API, enemy
-population, deterministic movement, jump/crouch/slide/lean, continuous-slope
-collision, pause and input clearing, resize, firing, ADS, reload, player damage,
-real two-way ballistic combat, effects, victory, defeat, three deterministic
-restart cycles, pointer-lock loss, and browser/internal diagnostics.
+`npm test` runs 22 contract and browser-level checks covering the 35° vision
+boundary, 2–4 second reaction, non-perfect spread, gradual aim tracking, corpse
+fall/despawn, ten low-step/high-wall collision cases, hostile local-storage
+input, boot, movement, jump/crouch/slide/lean, continuous slopes, pause, resize,
+weapons, two-way combat, victory, operation scaling and safe randomized spawns,
+defeat, deterministic restarts, pointer-lock loss, and diagnostics.
 
-Final result: **18/18 passed in 350.85 seconds**, with zero console errors, page
-errors, failed requests, or HTTP errors.
+Final result: **22/22 passed in 267.35 seconds**, including Operation 2 at 14
+total enemies / 12 active, with zero console errors, page errors, failed
+requests, or HTTP errors.
 
 Report: `artifacts/tests/smoke-report.json`
 
@@ -259,8 +282,11 @@ per-image evidence are in
 
 - WebGL2 and desktop pointer-lock controls are required; touch and gamepad
   controls are not implemented.
-- This is a single-player, single-level, single-rifle, fixed-objective game. It
-  has no networking, save system, or progression.
+- This is a single-player, single-map, single-rifle game. Operations scale
+  indefinitely on the same authored district rather than introducing new maps.
+- Highest-operation persistence is local and intentionally stores no sensitive
+  data. It is not tamper-proof against DevTools, extensions, or local profile
+  modification; authoritative anti-cheat would require a backend.
 - Browser audio begins only after a user gesture.
 - Live quality switching does not regenerate procedural material textures.
 - Smoke, capture, and profile scripts exercise source through Vite; run

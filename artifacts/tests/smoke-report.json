@@ -1,7 +1,22 @@
 {
   "status": "passed",
-  "durationMs": 350850.497928,
+  "durationMs": 267352.054006,
   "results": [
+    {
+      "name": "physics step contract",
+      "status": "passed",
+      "detail": "10 collision cases"
+    },
+    {
+      "name": "enemy AI contract",
+      "status": "passed",
+      "detail": "±35°, 2.88s reaction, 103/240 hits"
+    },
+    {
+      "name": "local progression contract",
+      "status": "passed",
+      "detail": "validated through operation 100000"
+    },
     {
       "name": "game boot",
       "status": "passed",
@@ -65,12 +80,17 @@
     {
       "name": "real ballistic combat",
       "status": "passed",
-      "detail": "target 100 → 0; player 100 → 91.48089600820094"
+      "detail": "target 100 → 0; player 100 → 87.95955292740837"
     },
     {
       "name": "objective victory loop",
       "status": "passed",
-      "detail": "6 hostiles neutralized"
+      "detail": "7 hostiles neutralized"
+    },
+    {
+      "name": "infinite operation progression",
+      "status": "passed",
+      "detail": "operation 2: 14 total, 12 active"
     },
     {
       "name": "complete defeat loop",
@@ -100,24 +120,24 @@
     "httpErrors": []
   },
   "gameDiagnostics": {
-    "frameCount": 42,
+    "frameCount": 43,
     "medianFrameMs": 50.00000074505806,
     "p95FrameMs": 250,
     "medianFps": 19.99999970197678,
-    "elapsedMs": 348256.3999999985,
+    "elapsedMs": 264677.3999999999,
     "counters": {
-      "listeners": 58,
-      "enemies": 7,
+      "listeners": 60,
+      "enemies": 12,
       "particles": 0
     },
     "errors": [],
     "renderer": {
       "memory": {
-        "geometries": 313,
+        "geometries": 358,
         "textures": 88
       },
       "render": {
-        "frame": 2289,
+        "frame": 2331,
         "calls": 0,
         "triangles": 0,
         "points": 0,
@@ -126,11 +146,11 @@
     },
     "rendererInfo": {
       "memory": {
-        "geometries": 313,
+        "geometries": 358,
         "textures": 88
       },
       "render": {
-        "frame": 2289,
+        "frame": 2331,
         "calls": 0,
         "triangles": 0,
         "points": 0,

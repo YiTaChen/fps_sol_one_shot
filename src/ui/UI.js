@@ -51,6 +51,12 @@ const UI_STYLES = `
   max-width:590px; margin:34px 0 30px; padding-left:16px; border-left:1px solid var(--cl-line);
   color:var(--cl-muted); font-size:13px; line-height:1.8; letter-spacing:.1em; text-transform:none;
 }
+.cl-record {
+  display:inline-flex; margin:-14px 0 28px; padding:7px 10px;
+  color:var(--cl-accent); border:1px solid rgba(217,173,85,.26);
+  background:rgba(217,173,85,.07); font-size:9px; font-weight:800; letter-spacing:.2em;
+}
+.cl-record[hidden] { display:none; }
 .cl-button-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
 .cl-btn {
   min-width:190px; border:1px solid rgba(231,239,227,.28); padding:14px 22px;
@@ -101,6 +107,9 @@ const UI_STYLES = `
 .cl-objective {
   display:inline-flex; align-items:center; gap:11px; margin-top:9px; padding:6px 12px;
   color:var(--cl-muted); font-size:9px; background:rgba(3,8,8,.44); border:1px solid rgba(255,255,255,.08);
+}
+.cl-objective .cl-operation {
+  padding-right:11px; border-right:1px solid rgba(255,255,255,.12);
 }
 .cl-objective b { color:var(--cl-ink); font-size:11px; }
 .cl-objective i { width:5px; height:5px; background:var(--cl-accent); transform:rotate(45deg); box-shadow:0 0 8px var(--cl-accent); }
@@ -216,6 +225,12 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
 }
 
+function positiveSafeInteger(value, fallback = 1) {
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) return fallback;
+  return Math.min(numeric, 100_000);
+}
+
 function getEventDirection(event) {
   const direction = event?.direction ?? event?.sourceDirection;
   if (Number.isFinite(direction)) return { relativeAngle: direction };
@@ -257,9 +272,7 @@ export class UI {
     this._installStyles();
     this._build();
     this._bindEvents();
-    this.setScreen('start', {
-      requiredKills: context.state?.requiredKills ?? 6,
-    });
+    this.setScreen('start', context.state);
     return this;
   }
 
@@ -283,9 +296,10 @@ export class UI {
       <section class="cl-screen cl-start" data-screen="start" aria-label="Start screen">
         <div class="cl-panel">
           <div>
-            <div class="cl-kicker">OPERATION 01 · ASH MARKET</div>
+            <div class="cl-kicker" data-start-operation>OPERATION 1 · ASH MARKET</div>
             <h1 class="cl-title">CINDER<br>LINE<small>ONE SHOT</small></h1>
             <p class="cl-mission">Sweep the Ash Market industrial quarter. Break contact when needed, use cover, and neutralize every hostile in the district.</p>
+            <div class="cl-record" data-highest-cleared hidden></div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="start">Deploy</button>
             </div>
@@ -332,13 +346,16 @@ export class UI {
       <section class="cl-screen cl-result" data-screen="victory" aria-label="Victory screen">
         <div class="cl-panel">
           <div>
-            <div class="cl-kicker">DISTRICT SECURE</div>
+            <div class="cl-kicker" data-victory-operation>OPERATION 1 · DISTRICT SECURE</div>
             <h1 class="cl-title cl-status-title">CLEAR</h1>
             <div class="cl-status-data">
               <div class="cl-stat"><strong data-result-kills>0</strong><span>Hostiles</span></div>
               <div class="cl-stat"><strong data-result-time>00:00</strong><span>Elapsed</span></div>
             </div>
-            <button class="cl-btn is-primary" data-action="restart">Run again</button>
+            <div class="cl-button-row">
+              <button class="cl-btn is-primary" data-action="next-level">Next operation</button>
+              <button class="cl-btn" data-action="restart">Restart current</button>
+            </div>
           </div>
         </div>
       </section>
@@ -358,7 +375,7 @@ export class UI {
       <div class="cl-hud is-hidden" aria-label="Heads up display">
         <div class="cl-topbar">
           <div class="cl-compass"><span data-cardinal>N</span><span class="cl-heading" data-heading>000</span></div>
-          <div class="cl-objective"><i></i><span>Neutralize hostiles</span><b><span data-kills>0</span> / <span data-required>6</span></b></div>
+          <div class="cl-objective"><span class="cl-operation">Operation <b data-level>1</b></span><i></i><span>Neutralize hostiles</span><b><span data-kills>0</span> / <span data-required>7</span></b></div>
         </div>
         <div class="cl-bottom-left">
           <div class="cl-health-mark" style="--health-angle:360deg"><span class="cl-health-value" data-health>100</span></div>
@@ -401,6 +418,10 @@ export class UI {
     this.nodes.reload = query('[data-reload]');
     this.nodes.kills = query('[data-kills]');
     this.nodes.required = query('[data-required]');
+    this.nodes.level = query('[data-level]');
+    this.nodes.startOperation = query('[data-start-operation]');
+    this.nodes.highestCleared = query('[data-highest-cleared]');
+    this.nodes.victoryOperation = query('[data-victory-operation]');
     this.nodes.heading = query('[data-heading]');
     this.nodes.cardinal = query('[data-cardinal]');
 
@@ -423,6 +444,9 @@ export class UI {
       subscribe(this.events, 'game:pause', () => this.setScreen('pause')),
       subscribe(this.events, 'game:resume', () => this.setScreen('playing')),
       subscribe(this.events, 'game:restart', () => this.reset()),
+      subscribe(this.events, 'game:next-level', () => {
+        this.reset('NEXT OPERATION DEPLOYED');
+      }),
       subscribe(this.events, 'game:victory', (data) => this.setScreen('victory', data)),
       subscribe(this.events, 'game:defeat', (data) => this.setScreen('defeat', data)),
       subscribe(this.events, 'quality:change', (data) => {
@@ -463,6 +487,9 @@ export class UI {
     } else if (action === 'restart') {
       emit(this.events, 'game:restart', { source: 'ui' });
       emit(this.events, 'audio:play', { name: 'ui-confirm' });
+    } else if (action === 'next-level') {
+      emit(this.events, 'game:next-level', { source: 'ui' });
+      emit(this.events, 'audio:play', { name: 'ui-confirm' });
     }
   }
 
@@ -481,6 +508,7 @@ export class UI {
 
   setScreen(name, data = {}) {
     const canonical = name === 'play' || name === 'game' ? 'playing' : name;
+    this._updateProgression(data);
     this.screen = canonical;
     this.root.querySelectorAll('[data-screen]').forEach((screen) => {
       screen.classList.toggle('is-visible', screen.dataset.screen === canonical);
@@ -498,6 +526,23 @@ export class UI {
     }
   }
 
+  _updateProgression(data = {}) {
+    const state = data?.state ?? data?.game ?? data;
+    const contextState = this.context?.state ?? {};
+    const level = positiveSafeInteger(state?.level ?? contextState.level, 1);
+    const highest = positiveSafeInteger(
+      state?.highestClearedLevel ?? contextState.highestClearedLevel,
+      0,
+    );
+    this._text('level', level);
+    this.nodes.startOperation.textContent = `OPERATION ${level} · ASH MARKET`;
+    this.nodes.victoryOperation.textContent =
+      `OPERATION ${level} · DISTRICT SECURE`;
+    this.nodes.highestCleared.hidden = highest <= 0;
+    this.nodes.highestCleared.textContent =
+      highest > 0 ? `HIGHEST CLEARED · OPERATION ${highest}` : '';
+  }
+
   render(snapshot = {}) {
     this.time += Number(snapshot.dt ?? 1 / 60);
     const player = snapshot.player ?? snapshot.playerSnapshot ?? snapshot;
@@ -507,7 +552,8 @@ export class UI {
     const magazine = Math.max(0, Number(weapon.magazine ?? weapon.ammo ?? state.magazine ?? 0));
     const reserve = Math.max(0, Number(weapon.reserve ?? weapon.reserveAmmo ?? state.reserve ?? 0));
     const kills = Math.max(0, Number(state.kills ?? snapshot.kills ?? 0));
-    const required = Math.max(1, Number(state.requiredKills ?? snapshot.requiredKills ?? 6));
+    const required = Math.max(1, Number(state.requiredKills ?? snapshot.requiredKills ?? 7));
+    const level = positiveSafeInteger(state.level ?? snapshot.level, 1);
     const elapsed = Number(state.elapsed ?? snapshot.elapsed ?? 0);
     const yaw = Number(player.yaw ?? snapshot.yaw ?? this.context?.camera?.rotation?.y ?? 0);
     const ads = Boolean(weapon.ads ?? weapon.isADS ?? player.ads);
@@ -521,6 +567,8 @@ export class UI {
     this._text('reserve', Math.floor(reserve).toString().padStart(3, '0'));
     this._text('kills', kills);
     this._text('required', required);
+    this._text('level', level);
+    this._updateProgression(state);
     if (weapon.name) this._text('weaponName', weapon.name);
     this.last.kills = kills;
     this.last.elapsed = elapsed;
@@ -621,7 +669,7 @@ export class UI {
     this.announcementUntil = performance.now() + clamp(duration, 0.5, 8) * 1000;
   }
 
-  reset() {
+  reset(announcement = 'OPERATION RESTARTED') {
     this.hitmarkerUntil = 0;
     this.announcementUntil = 0;
     this.crosshairKick = 0;
@@ -632,8 +680,8 @@ export class UI {
     this.nodes.hitmarker.classList.remove('is-visible', 'is-kill', 'is-headshot');
     this.nodes.damageVignette.style.opacity = '0';
     this.last = Object.create(null);
-    this.setScreen('playing');
-    this.announce('OPERATION RESTARTED', 'neutral', 1.4);
+    this.setScreen('playing', this.context?.state);
+    this.announce(announcement, 'neutral', 1.4);
   }
 
   _formatTime(seconds) {

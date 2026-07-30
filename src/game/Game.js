@@ -8,7 +8,11 @@ import {
 } from "../core/index.js";
 import { AudioSystem } from "../audio/AudioSystem.js";
 import { Effects } from "../effects/Effects.js";
-import { EnemyDirector, EnemyState } from "../enemies/EnemyDirector.js";
+import {
+  ENEMY_INITIAL_SAFE_RADIUS,
+  EnemyDirector,
+  EnemyState,
+} from "../enemies/EnemyDirector.js";
 import { MaterialLibrary } from "../materials/MaterialLibrary.js";
 import { PhysicsWorld } from "../physics/PhysicsWorld.js";
 import { PlayerController } from "../player/PlayerController.js";
@@ -16,8 +20,15 @@ import { RendererSystem } from "../rendering/RendererSystem.js";
 import { UI } from "../ui/UI.js";
 import { Rifle } from "../weapons/Rifle.js";
 import { WorldBuilder } from "../world/WorldBuilder.js";
+import {
+  deriveLevelSeed,
+  readHighestClearedLevel,
+  writeHighestClearedLevel,
+} from "./Progression.js";
 
 const FIXED_STEP = 1 / 60;
+const BASE_ENEMY_COUNT = 7;
+const ACTIVE_ENEMY_LIMIT = 12;
 const _damageDirection = new THREE.Vector3(0, 0, 1);
 const _capturePosition = new THREE.Vector3();
 const _captureTarget = new THREE.Vector3();
@@ -111,7 +122,8 @@ export class Game {
     this.container = container;
     this.options = options;
     this.events = new EventBus();
-    this.rng = new RngService(options.seed ?? 0x0c1de71e);
+    this.baseSeed = Number(options.seed ?? 0x0c1de71e) >>> 0;
+    this.rng = new RngService(this.baseSeed);
     this.clock = new FixedClock(FIXED_STEP);
     this.diagnostics = new Diagnostics();
     this.physics = new PhysicsWorld();
@@ -121,10 +133,14 @@ export class Game {
     );
     this.state = {
       phase: "menu",
+      level: 1,
+      baseEnemyCount: BASE_ENEMY_COUNT,
+      highestClearedLevel: readHighestClearedLevel(),
       kills: 0,
-      requiredKills: 6,
+      requiredKills: BASE_ENEMY_COUNT,
       elapsed: 0,
-      seed: this.rng.seed,
+      seed: this.baseSeed,
+      baseSeed: this.baseSeed,
       quality: this.rendering.quality.name,
     };
     this.context = {
@@ -207,10 +223,12 @@ export class Game {
     this.enemies = new EnemyDirector({
       world: this.world,
       player: this.player,
-      count: 7,
+      count: BASE_ENEMY_COUNT,
+      activeLimit: ACTIVE_ENEMY_LIMIT,
+      safeRadius: ENEMY_INITIAL_SAFE_RADIUS,
     });
     this.enemies.init(this.context);
-    this.state.requiredKills = Math.min(6, this.enemies.enemies.length);
+    this.state.requiredKills = BASE_ENEMY_COUNT;
 
     this.audio = new AudioSystem();
     this.audio.init(this.context);
@@ -250,6 +268,7 @@ export class Game {
       this.events.on("game:pause", () => this.applyPause()),
       this.events.on("game:resume", () => this.applyResume()),
       this.events.on("game:restart", () => this.applyRestart()),
+      this.events.on("game:next-level", () => this.advanceLevel()),
       this.events.on("quality:change", (event) =>
         this.applyQuality(event?.name ?? event?.preset ?? event)),
       this.events.on("input:pointer-lock", ({ locked }) => {
@@ -305,15 +324,44 @@ export class Game {
   }
 
   applyRestart() {
+    this._resetRound();
+  }
+
+  advanceLevel() {
+    if (this.state.phase !== "victory") return false;
+    this.state.level += 1;
+    this.state.seed = deriveLevelSeed(this.baseSeed, this.state.level);
+    this.state.requiredKills = this._enemyCountForLevel(this.state.level);
+    this._resetRound();
+    return true;
+  }
+
+  _enemyCountForLevel(level = this.state.level) {
+    return Math.max(
+      BASE_ENEMY_COUNT,
+      Math.min(
+        Number.MAX_SAFE_INTEGER,
+        BASE_ENEMY_COUNT * Math.max(1, Math.floor(level)),
+      ),
+    );
+  }
+
+  _resetRound() {
     this.state.phase = "playing";
     this.state.kills = 0;
     this.state.elapsed = 0;
+    this.state.requiredKills = this._enemyCountForLevel();
     this.rng.reset(this.state.seed);
     this.input.reset();
     this.player.reset(this.state.seed);
     this.rifle.reset(this.state.seed);
     this.effects.reset(this.state.seed);
-    this.enemies.reset(this.state.seed);
+    this.enemies.reset(this.state.seed, {
+      totalCount: this.state.requiredKills,
+      activeLimit: ACTIVE_ENEMY_LIMIT,
+      playerSpawn: this.player.spawnPosition,
+      safeRadius: ENEMY_INITIAL_SAFE_RADIUS,
+    });
     this.player.setEnabled(true);
     this.rifle.setEnabled(true);
     this.input.enabled = true;
@@ -345,6 +393,14 @@ export class Game {
 
   finishMatch(result) {
     this.state.phase = result;
+    if (result === "victory") {
+      const persisted = writeHighestClearedLevel(this.state.level);
+      this.state.highestClearedLevel = Math.max(
+        this.state.highestClearedLevel,
+        persisted,
+        this.state.level,
+      );
+    }
     this.player.setEnabled(false);
     this.rifle.setEnabled(false);
     this.input.enabled = false;
@@ -353,11 +409,19 @@ export class Game {
     this.events.emit(`game:${result}`, {
       kills: this.state.kills,
       elapsed: this.state.elapsed,
+      level: this.state.level,
+      highestClearedLevel: this.state.highestClearedLevel,
+      requiredKills: this.state.requiredKills,
     });
   }
 
   fixedUpdate(dt) {
-    if (this.state.phase !== "playing") return;
+    if (this.state.phase !== "playing") {
+      if (this.state.phase === "victory" || this.state.phase === "defeat") {
+        this.enemies.fixedUpdate(dt);
+      }
+      return;
+    }
     this.state.elapsed += dt;
     this.player.fixedUpdate(dt);
     this.rifle.fixedUpdate(dt);
@@ -602,6 +666,10 @@ export class Game {
           heroEnemy.detection = 1;
           heroEnemy.canSeePlayer = true;
           heroEnemy.reactionTimer = 0;
+          heroEnemy.aimPoint.copy(this.player.eyePosition);
+          heroEnemy.aimVelocity.set(0, 0, 0);
+          heroEnemy.aimAlignment = 1;
+          heroEnemy.accuracy = 1;
           heroEnemy.burstRemaining = 4;
           heroEnemy.shotTimer = 0;
           heroEnemy.state = EnemyState.FIRE;
@@ -664,6 +732,9 @@ export class Game {
   stateSnapshot() {
     return {
       phase: this.state.phase,
+      level: this.state.level,
+      baseEnemyCount: this.state.baseEnemyCount,
+      highestClearedLevel: this.state.highestClearedLevel,
       kills: this.state.kills,
       requiredKills: this.state.requiredKills,
       elapsed: this.state.elapsed,
@@ -750,6 +821,10 @@ export class Game {
       },
       restart: async () => {
         this.events.emit("game:restart", { source: "test" });
+        return this.stateSnapshot();
+      },
+      nextLevel: async () => {
+        this.events.emit("game:next-level", { source: "test" });
         return this.stateSnapshot();
       },
       resize: async (width, height) => this.rendering.resize(width, height),

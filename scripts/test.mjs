@@ -12,6 +12,9 @@ import {
 } from './lib/browserHarness.mjs';
 import { missingMethods } from '../tests/test-contract.mjs';
 import { assertRestartSnapshot } from '../tests/restart-contract.mjs';
+import { runEnemyAiContract } from '../tests/enemy-ai-contract.mjs';
+import { runPhysicsStepContract } from '../tests/physics-step-contract.mjs';
+import { runProgressionContract } from '../tests/progression-contract.mjs';
 
 const results = [];
 const startedAt = performance.now();
@@ -22,6 +25,18 @@ function pass(name, detail = '') {
 }
 
 async function main() {
+  const physicsContract = runPhysicsStepContract();
+  pass('physics step contract', `${physicsContract.checks} collision cases`);
+  const enemyAiContract = runEnemyAiContract();
+  pass(
+    'enemy AI contract',
+    `±${enemyAiContract.coneDegrees}°, ${enemyAiContract.reactionSeconds.toFixed(2)}s reaction, ${enemyAiContract.spreadHits}/${enemyAiContract.spreadShots} hits`,
+  );
+  const progressionContract = runProgressionContract();
+  pass(
+    'local progression contract',
+    `validated through operation ${progressionContract.maximumLevel}`,
+  );
   const server = await ensureServer();
   let browser;
   try {
@@ -349,6 +364,75 @@ async function main() {
       `Killing the objective did not trigger victory (phase=${combat.state.phase})`,
     );
     pass('objective victory loop', `${combat.killed} hostiles neutralized`);
+
+    const progression = await page.evaluate(async () => {
+      const api = window.__FPS_TEST__;
+      const game = window.__CINDERLINE__;
+      const before = api.snapshot();
+      const beforePositions = before.enemies.map((enemy) => enemy.position);
+      const worldRoot = game.world.root.uuid;
+      const stored = localStorage.getItem('cinderline.highest-cleared-level.v1');
+      const record = document.querySelector('[data-highest-cleared]');
+      const recordState = {
+        hidden: record?.hidden,
+        text: record?.textContent,
+      };
+      const stateAfterAdvance = await api.nextLevel();
+      const after = api.snapshot();
+      const spawn = game.player.spawnPosition;
+      const minimumSpawnDistance = Math.min(...after.enemies
+        .filter((enemy) => enemy.alive)
+        .map((enemy) => Math.hypot(
+          enemy.position.x - spawn.x,
+          enemy.position.y - spawn.y,
+          enemy.position.z - spawn.z,
+        )));
+      const positionsChanged = after.enemies.some((enemy, index) => {
+        const previous = beforePositions[index];
+        return !previous || Math.hypot(
+          enemy.position.x - previous.x,
+          enemy.position.y - previous.y,
+          enemy.position.z - previous.z,
+        ) > 0.25;
+      });
+      return {
+        stored,
+        recordState,
+        stateAfterAdvance,
+        activeEnemies: after.enemies.filter((enemy) => enemy.alive).length,
+        totalEnemies: game.enemies.snapshot.total,
+        minimumSpawnDistance,
+        positionsChanged,
+        sameWorld: worldRoot === game.world.root.uuid,
+        initiallyAlerted: after.enemies.filter((enemy) => enemy.alerted).length,
+        playerHealth: after.player.health,
+      };
+    });
+    assert(
+      progression.stored === '1'
+      && progression.recordState.hidden === false
+      && /OPERATION 1/.test(progression.recordState.text ?? ''),
+      `Highest cleared operation was not persisted/displayed (${JSON.stringify(progression)})`,
+    );
+    assert(
+      progression.stateAfterAdvance.level === 2
+      && progression.stateAfterAdvance.requiredKills === 14
+      && progression.totalEnemies === 14
+      && progression.activeEnemies === 12,
+      `Next operation did not scale 7 × level (${JSON.stringify(progression)})`,
+    );
+    assert(
+      progression.sameWorld
+      && progression.positionsChanged
+      && progression.minimumSpawnDistance >= 41.5
+      && progression.initiallyAlerted === 0
+      && progression.playerHealth === 100,
+      `Next operation spawn safety/map reuse failed (${JSON.stringify(progression)})`,
+    );
+    pass(
+      'infinite operation progression',
+      `operation 2: ${progression.totalEnemies} total, ${progression.activeEnemies} active`,
+    );
 
     await page.evaluate(async () => {
       const api = window.__FPS_TEST__;

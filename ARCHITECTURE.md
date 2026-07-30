@@ -48,9 +48,9 @@ constructors. Its stable shape is:
 ```
 
 Subsystems retain only the fields they need. They do not add arbitrary fields.
-Game-owned mutable state is exposed as a small `state` record: `phase`, `kills`,
-`requiredKills`, `elapsed`, `seed`, and read-only references to player/weapon
-snapshots.
+Game-owned mutable state is exposed as a small `state` record: `phase`, `level`,
+`baseEnemyCount`, `highestClearedLevel`, `kills`, `requiredKills`, `elapsed`,
+`baseSeed`, `seed`, and read-only references to player/weapon snapshots.
 
 ## Public Subsystem Interfaces
 
@@ -75,8 +75,9 @@ Additional stable feature contracts:
   `teleport(position, yaw)`, `setEnabled(boolean)`.
 - `Rifle.snapshot`, `triggerDown()`, `triggerUp()`, `setADS(boolean)`,
   `requestReload()`, `rayOrigin`, `rayDirection`.
-- `EnemyDirector.enemies`, `livingCount`, `applyProjectileHit(hit)`,
-  `forceAlert(position)`.
+- `EnemyDirector.enemies`, `livingCount`, `snapshot`,
+  `reset(seed, { totalCount, activeLimit, playerSpawn, safeRadius })`,
+  `applyProjectileHit(hit)`, `forceAlert(position)`.
 - `Effects.spawnImpact(hit)`, `spawnMuzzle(data)`, `spawnTracer(a, b, kind)`,
   `reset()`.
 - `AudioSystem.resume()`, `play(name, options)`, `setListener(transform)`.
@@ -87,7 +88,7 @@ Additional stable feature contracts:
 Events are plain immutable payloads. Public names:
 
 - Lifecycle: `game:start`, `game:pause`, `game:resume`, `game:restart`,
-  `game:victory`, `game:defeat`, `quality:change`.
+  `game:next-level`, `game:victory`, `game:defeat`, `quality:change`.
 - Player: `player:move-state`, `player:land`, `player:jump`, `player:damage`,
   `player:death`, `player:mantle`.
 - Weapon: `weapon:fire`, `weapon:dry`, `weapon:reload-start`,
@@ -124,7 +125,8 @@ recreate the renderer, DOM shell, global input listeners, or AudioContext.
 - Maximum accumulated time: `0.25 s`; maximum fixed steps per render: 8.
 - Render uses `alpha = accumulator / fixedStep` for presentation interpolation.
 - Ballistics, player collision, AI decisions, damage, and timers run only in
-  `fixedUpdate`.
+  `fixedUpdate`. Terminal victory/defeat simulation advances corpse timers but
+  not living actors.
 - Camera/viewmodel sway and particle interpolation run in `update`.
 - When paused or pointer lock is lost during play, the accumulator is cleared and
   input state reset. The menu can animate, but gameplay simulation is frozen.
@@ -141,8 +143,10 @@ recreate the renderer, DOM shell, global input listeners, or AudioContext.
 - `weapon-spread`, `effects`, `audio-variation`
 - `capture`
 
-Restart recreates streams from the original seed. Visual-only consumption cannot
-change gameplay outcomes because streams are isolated.
+Restart recreates streams from the current operation seed. Advancing derives a
+new deterministic operation seed from `baseSeed` while retaining the same
+immutable world. Visual-only consumption cannot change gameplay outcomes because
+streams are isolated.
 
 ## Rendering Contract
 
@@ -167,7 +171,8 @@ Medium preset at 1280×720 internal resolution:
 - ≤1.2M visible triangles; ≤180 material programs
 - world shadow casters limited to authored hero geometry and actors
 - ≤96 active particles, 32 tracers, 48 impact decals, 24 shells
-- 6–8 simultaneously active enemies, AI perception staggered across frames
+- up to 12 simultaneously active enemies, with total operation quota equal to
+  `7 × level` and reinforcements filling vacated active slots
 - textures default to 256²/512² generated maps and share families
 - device pixel ratio cap: low `1.0`, medium `1.25`, high `1.75`
 - no recurring >100 ms frame after shader warm-up
@@ -204,4 +209,3 @@ The lead alone integrates subsystem outputs and owns:
 Subsystem agents must provide build/static-test evidence for their owned files,
 enumerate assumptions, and flag remaining integration work. Their success claims
 are provisional until the lead executes the integrated game.
-
