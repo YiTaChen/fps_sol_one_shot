@@ -38,11 +38,12 @@ const DEFAULTS = Object.freeze({
   gravity: 18.5,
   maxFallSpeed: 32,
   maxSlope: Math.PI * 0.29,
+  maxStepHeight: 0.44,
   slideDuration: 0.78,
   slideMinSpeed: 5.1,
   slideFriction: 5.5,
   mantleMinHeight: 0.38,
-  mantleMaxHeight: 1.18,
+  mantleMaxHeight: 0.44,
   mantleReach: 0.82,
   mantleDuration: 0.43,
   leanDistance: 0.29,
@@ -264,6 +265,8 @@ export class PlayerController {
       height: this.options.standingHeight,
       halfHeight: this.options.standingHeight * 0.5,
       maxSlope: this.options.maxSlope,
+      maxStepHeight: this.options.maxStepHeight,
+      canStep: false,
     };
 
     this.snapshot = {
@@ -337,6 +340,7 @@ export class PlayerController {
     this.stanceHeight = this.options.standingHeight;
     this.capsule.height = this.options.standingHeight;
     this.capsule.halfHeight = this.capsule.height * 0.5;
+    this.capsule.canStep = false;
     this.lean = 0;
     this.targetLean = 0;
     this._bobPhase = 0;
@@ -574,6 +578,7 @@ export class PlayerController {
     this.eyeHeight = damp(this.eyeHeight, targetEye, wantsCrouch ? 18 : 12, dt);
     this.capsule.height = this.stanceHeight;
     this.capsule.halfHeight = this.stanceHeight * 0.5;
+    this.capsule.canStep = false;
 
     if (jumpPressed) {
       if (this._tryMantle()) {
@@ -603,6 +608,7 @@ export class PlayerController {
     }
     this.verticalSpeedBeforeLand = this.velocity.y;
 
+    this.capsule.canStep = this.grounded && !jumpPressed && this.velocity.y <= 0.05;
     DELTA.copy(this.velocity).multiplyScalar(dt);
     const result = this._moveCapsule(DELTA);
     this.grounded = Boolean(
@@ -702,7 +708,13 @@ export class PlayerController {
   }
 
   _tryMantle() {
-    if (!this.physics || typeof this.physics.raycast !== 'function') return false;
+    if (
+      !this.grounded
+      || !this.physics
+      || typeof this.physics.raycast !== 'function'
+    ) {
+      return false;
+    }
     FORWARD.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
 
     RAY_ORIGIN.copy(this.position).addScaledVector(UP, 0.62);
@@ -846,6 +858,18 @@ export class PlayerController {
       if (!hit) continue;
       const normalY = Number(hit.normal?.y ?? 0);
       if (Math.abs(normalY) > 0.55) continue;
+      const obstacleTop = Number(hit.collider?.max?.y);
+      const stepRise = obstacleTop - this.position.y;
+      if (
+        this.capsule.canStep
+        && Number.isFinite(stepRise)
+        && stepRise > 0
+        && stepRise <= this.options.maxStepHeight + 1e-6
+      ) {
+        // PhysicsWorld owns the raised-capsule clearance test. Clipping this
+        // low hit here would prevent an otherwise valid step attempt.
+        continue;
+      }
       allowed = Math.min(
         allowed,
         Math.max(0, hitDistance(hit) - this.options.radius - skin),

@@ -1,14 +1,18 @@
 import * as THREE from "three";
 
 const _candidatePosition = new THREE.Vector3();
-const _axisDelta = new THREE.Vector3();
 const _rayPoint = new THREE.Vector3();
 const _rayNormal = new THREE.Vector3();
 const _invDirection = new THREE.Vector3();
 const _capsuleBox = new THREE.Box3();
+const _clearanceBox = new THREE.Box3();
 const _expanded = new THREE.Box3();
 const _pointA = new THREE.Vector3();
 const _pointB = new THREE.Vector3();
+const _stepPosition = new THREE.Vector3();
+
+const COLLISION_EPSILON = 1e-6;
+const DEFAULT_COLLISION_SKIN = 0.0025;
 
 function rampHeightAt(collider, point) {
   const axis = collider.rampAxis === "x" ? "x" : "z";
@@ -91,6 +95,32 @@ function buildCapsuleBox(position, capsule, target = _capsuleBox) {
   );
 }
 
+function overlapsStrict(a, b, epsilon = COLLISION_EPSILON) {
+  return (
+    a.max.x > b.min.x + epsilon
+    && a.min.x < b.max.x - epsilon
+    && a.max.y > b.min.y + epsilon
+    && a.min.y < b.max.y - epsilon
+    && a.max.z > b.min.z + epsilon
+    && a.min.z < b.max.z - epsilon
+  );
+}
+
+function overlapsHorizontal(a, b, epsilon = COLLISION_EPSILON) {
+  return (
+    a.max.x > b.min.x + epsilon
+    && a.min.x < b.max.x - epsilon
+    && a.max.z > b.min.z + epsilon
+    && a.min.z < b.max.z - epsilon
+  );
+}
+
+function capsuleClearOfBoxes(position, capsule, colliders) {
+  const box = buildCapsuleBox(position, capsule, _clearanceBox);
+  return !colliders.some((collider) =>
+    collider.kind !== "ramp" && overlapsStrict(box, collider.box));
+}
+
 export class PhysicsWorld {
   constructor() {
     this.staticColliders = [];
@@ -151,40 +181,121 @@ export class PhysicsWorld {
     const resultPosition = _candidatePosition.copy(position);
     const collisions = [];
     let grounded = false;
-    const axes = ["x", "z", "y"];
-    for (const axis of axes) {
-      _axisDelta.set(0, 0, 0);
-      _axisDelta[axis] = delta[axis];
-      resultPosition.add(_axisDelta);
-      const capsuleBox = buildCapsuleBox(resultPosition, capsule);
+    const radius = capsule.radius ?? 0.34;
+    const height = capsule.height ?? capsule.standingHeight ?? 1.72;
+    const skin = Math.max(
+      COLLISION_EPSILON * 2,
+      Number(capsule.skin ?? DEFAULT_COLLISION_SKIN),
+    );
+    const maxStepHeight = Math.max(
+      0,
+      Number(capsule.maxStepHeight ?? capsule.stepHeight ?? 0),
+    );
+    const canStep = Boolean(capsule.canStep)
+      && delta.y <= COLLISION_EPSILON
+      && maxStepHeight > 0;
+    const movementStartY = resultPosition.y;
+
+    for (const axis of ["x", "z"]) {
+      const axisMovement = Number(delta[axis]) || 0;
+      if (Math.abs(axisMovement) <= COLLISION_EPSILON) continue;
+
+      resultPosition[axis] += axisMovement;
+      let capsuleBox = buildCapsuleBox(resultPosition, capsule);
       for (const collider of this.staticColliders) {
         if (collider.kind === "ramp") continue;
-        if (!capsuleBox.intersectsBox(collider.box)) continue;
-        const radius = capsule.radius ?? 0.34;
-        const height = capsule.height ?? capsule.standingHeight ?? 1.72;
-        if (axis === "x") {
-          resultPosition.x = delta.x > 0
-            ? collider.min.x - radius
-            : collider.max.x + radius;
-        } else if (axis === "z") {
-          resultPosition.z = delta.z > 0
-            ? collider.min.z - radius
-            : collider.max.z + radius;
-        } else if (delta.y <= 0) {
-          resultPosition.y = collider.max.y;
-          grounded = true;
-        } else {
-          resultPosition.y = collider.min.y - height;
+        if (!overlapsStrict(capsuleBox, collider.box)) continue;
+
+        const stepRise = collider.max.y - movementStartY;
+        if (
+          canStep
+          && stepRise > skin
+          && stepRise <= maxStepHeight + COLLISION_EPSILON
+        ) {
+          _stepPosition.copy(resultPosition);
+          _stepPosition.y = collider.max.y + skin;
+          if (capsuleClearOfBoxes(_stepPosition, capsule, this.staticColliders)) {
+            resultPosition.copy(_stepPosition);
+            capsuleBox = buildCapsuleBox(resultPosition, capsule);
+            grounded = true;
+            collisions.push({
+              collider,
+              axis: "step",
+              normal: new THREE.Vector3(0, 1, 0),
+            });
+            continue;
+          }
         }
-        buildCapsuleBox(resultPosition, capsule);
+
+        resultPosition[axis] = axisMovement > 0
+          ? collider.min[axis] - radius - skin
+          : collider.max[axis] + radius + skin;
+        capsuleBox = buildCapsuleBox(resultPosition, capsule);
         collisions.push({
           collider,
           axis,
           normal: new THREE.Vector3(
-            axis === "x" ? -Math.sign(delta.x) : 0,
-            axis === "y" ? -Math.sign(delta.y) : 0,
-            axis === "z" ? -Math.sign(delta.z) : 0,
+            axis === "x" ? -Math.sign(axisMovement) : 0,
+            0,
+            axis === "z" ? -Math.sign(axisMovement) : 0,
           ),
+        });
+      }
+    }
+
+    const verticalMovement = Number(delta.y) || 0;
+    if (Math.abs(verticalMovement) > COLLISION_EPSILON) {
+      const beforeY = resultPosition.y;
+      const afterY = beforeY + verticalMovement;
+      const horizontalBox = buildCapsuleBox(resultPosition, capsule);
+      let verticalCollider = null;
+
+      if (verticalMovement < 0) {
+        let landingY = Number.NEGATIVE_INFINITY;
+        for (const collider of this.staticColliders) {
+          if (collider.kind === "ramp") continue;
+          if (!overlapsHorizontal(horizontalBox, collider.box)) continue;
+          const surfaceY = collider.max.y;
+          if (
+            beforeY >= surfaceY - skin
+            && afterY <= surfaceY + skin
+            && surfaceY > landingY
+          ) {
+            landingY = surfaceY;
+            verticalCollider = collider;
+          }
+        }
+        if (verticalCollider) {
+          resultPosition.y = landingY;
+          grounded = true;
+        } else {
+          resultPosition.y = afterY;
+        }
+      } else {
+        const beforeTop = beforeY + height;
+        const afterTop = afterY + height;
+        let ceilingY = Number.POSITIVE_INFINITY;
+        for (const collider of this.staticColliders) {
+          if (collider.kind === "ramp") continue;
+          if (!overlapsHorizontal(horizontalBox, collider.box)) continue;
+          const surfaceY = collider.min.y;
+          if (
+            beforeTop <= surfaceY + skin
+            && afterTop >= surfaceY - skin
+            && surfaceY < ceilingY
+          ) {
+            ceilingY = surfaceY;
+            verticalCollider = collider;
+          }
+        }
+        resultPosition.y = verticalCollider ? ceilingY - height : afterY;
+      }
+
+      if (verticalCollider) {
+        collisions.push({
+          collider: verticalCollider,
+          axis: "y",
+          normal: new THREE.Vector3(0, -Math.sign(verticalMovement), 0),
         });
       }
     }
@@ -192,7 +303,6 @@ export class PhysicsWorld {
     // Ramps use a continuous procedural height plane rather than stacked box
     // steps. A conservative foot probe snaps only grounded/downward movement,
     // leaving jumps and mantle arcs unaffected.
-    const radius = capsule.radius ?? 0.34;
     for (const collider of this.staticColliders) {
       if (collider.kind !== "ramp") continue;
       const axis = collider.rampAxis === "x" ? "x" : "z";
@@ -246,7 +356,7 @@ export class PhysicsWorld {
   capsuleClear(position, capsule = {}) {
     const capsuleBox = buildCapsuleBox(position, capsule);
     return !this.staticColliders.some((collider) =>
-      collider.kind !== "ramp" && capsuleBox.intersectsBox(collider.box));
+      collider.kind !== "ramp" && overlapsStrict(capsuleBox, collider.box));
   }
 
   raycast(origin, direction, maxDistance = 100, mask = 0xffffffff) {
