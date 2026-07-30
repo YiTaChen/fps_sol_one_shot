@@ -1,44 +1,99 @@
 # Cinderline: One Shot
 
-![Active combat](artifacts/captures/07-active-combat.png)
-
-**Cinderline: One Shot** is an original, deterministic browser tactical FPS
-built with Three.js and WebGL2. Its single industrial-market district is
-authored, then assembled and dressed procedurally at runtime. The game includes
-real projectile ballistics, combat AI, advanced first-person movement, a
-code-built rifle and soldier rigs, pooled effects, a complete match loop, and
+An original, deterministic browser tactical FPS built with Three.js and WebGL2.
+Fight through a code-generated industrial market with projectile ballistics,
+reactive combat AI, advanced first-person movement, endless operations, and
 synthesized spatial audio.
 
-The runtime downloads no models, textures, images, or audio samples. Geometry,
-PBR maps, props, architecture, weapon and character assets, effects, ambience,
-and sound effects are generated from code.
+**▶ [Run locally](#quick-start)** · **[Explore the gameplay](#gameplay)** ·
+**[See how it was built](#ai-agent-assisted-development)** ·
+**[Review the evidence](#validation-and-evidence)**
 
-## Objective
+![Active combat in Ash Market, showing the rifle, enemy soldier, tactical HUD, muzzle effects, and code-generated industrial district](artifacts/captures/07-active-combat.png)
+
+The runtime downloads no models, textures, images, or audio samples. Buildings,
+interiors, props, PBR maps, the rifle, hands, soldiers, effects, ambience, and
+sound effects are all constructed from code.
+
+## At a glance
+
+| | |
+|---|---|
+| **Genre** | Single-player browser tactical FPS |
+| **Engine** | Three.js `0.180.0`, WebGL2, Web Audio |
+| **World** | Authored Ash Market layout with deterministic procedural assembly and dressing |
+| **Simulation** | Fixed `1 / 60 s` gameplay step with isolated seeded RNG streams |
+| **Progression** | Endless operations with `7 × operation` total hostiles |
+| **Asset policy** | No downloaded models, textures, images, or audio samples at runtime |
+| **Validation** | 22/22 automated checks, 7 deterministic captures, zero recorded browser errors |
+
+## Gameplay
 
 Deploy into Ash Market and neutralize every hostile before your health reaches
-zero. Operation 1 contains seven soldiers. Clearing it unlocks an endless
-sequence on the same map, with `7 × operation` total enemies and newly seeded
-spawn positions. Up to 12 are active at once; later-operation reinforcements
-enter after casualties so the browser remains playable as the total grows.
+zero. Operation 1 begins with seven soldiers. Clearing it unlocks the next
+operation on the same district with newly seeded enemy positions and a total
+enemy quota of:
 
-Soldiers patrol, investigate sound, pursue, use cover, reposition, aim, fire,
-react to hits, and reload. Unaware vision is limited to a 35° half-angle and a
-38 m range with line-of-sight occlusion. A newly spotted player receives a
-deterministic 2–4 second reaction window. Enemy aim turns and tracks with
-inertia, while angular spread, burst bloom, suppression, and player movement
-produce both hits and misses instead of instant perfect tracking.
+```text
+total hostiles = 7 × current operation
+```
 
-Combat supports projectile travel, gravity, hit zones, headshots, penetrable
-materials, shallow metal ricochets, surface-specific impacts, decals, particles,
-tracers, hit markers, and directional damage feedback. Fallen soldiers buckle,
-fall fully to the ground, linger, and despawn. Victory, next operation, defeat,
-pause, resume, and deterministic current-operation restart are all playable.
+Up to 12 enemies are active at once; reinforcements fill open slots until the
+operation quota is exhausted. New operations keep enemies outside a 42 m safety
+radius around the player spawn, so the player is not detected and fired upon
+immediately.
 
 The highest cleared operation is stored in versioned browser `localStorage` and
-shown on the start screen only after the first clear. The value is treated as
-untrusted input and validated before display or use. Like every client-only
-save, it can still be edited by the browser owner; tamper-proof competitive
-progress would require a server-authoritative account system.
+appears on the start screen after the first victory. Persisted values are treated
+as untrusted input, validated, bounded, and rendered with `textContent`.
+Client-only storage is convenient rather than tamper-proof; authoritative
+competitive progression would require a backend.
+
+## Feature highlights
+
+- **Tactical enemy perception** — soldiers detect only within a 35° half-angle,
+  38 m range, and unobstructed line of sight. Approaching from behind remains
+  unseen until sound or repositioning exposes the player.
+- **Humanized return fire** — first detection has a deterministic 2–4 second
+  reaction window. Aim turns and tracks with inertia; angular spread, burst
+  bloom, suppression, and player movement produce both hits and misses.
+- **Projectile combat** — travel time, gravity, body zones, headshots,
+  penetrable materials, shallow-angle metal ricochets, tracers, decals,
+  surface-specific impacts, and directional damage feedback.
+- **Advanced movement** — sprint, crouch, slide, jump, protected lean, slopes,
+  and grounded low-step traversal. The capsule may step or mantle only up to
+  0.44 m, preventing tall props and buildings from lifting the player onto roofs.
+- **Reactive enemies** — patrol, investigate, pursue, use cover, reposition,
+  fire, reload, react to hits, buckle when killed, fall fully to the ground, and
+  despawn after a short delay.
+- **Code-generated presentation** — procedural architecture and props, a
+  separate first-person viewmodel scene, pooled combat effects, post-processing,
+  and Web Audio synthesis with HRTF positioning.
+
+## Visual tour
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="artifacts/captures/01-wide-street.png" alt="A wide Ash Market street showing the generated industrial architecture, market stalls, signs, fog, and lighting">
+      <br><sub><b>Ash Market:</b> authored layout, procedurally assembled façades and street dressing.</sub>
+    </td>
+    <td width="50%">
+      <img src="artifacts/captures/02-facade-close.png" alt="Close view of a generated industrial façade with layered masonry, windows, signs, pipes, and market props">
+      <br><sub><b>Generated architecture:</b> layered façades, materials, signage, props, and weathering.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img width="70%" src="artifacts/captures/06-enemy.png" alt="Procedurally rigged enemy soldier carrying a rifle at tactical combat distance">
+      <br><sub><b>Combat AI:</b> procedural soldier rig with perception, movement, aiming, damage, and death states.</sub>
+    </td>
+  </tr>
+</table>
+
+Seven reproducible 1440×810 captures are tracked in
+[`artifacts/captures/`](artifacts/captures/). Their manifest records the seed,
+quality preset, SHA-256 hashes, combat state, and browser diagnostics.
 
 ## Controls
 
@@ -54,69 +109,72 @@ Click **Deploy** first to enable pointer-lock aiming and browser audio.
 | Hold `Shift` while moving forward | Sprint |
 | Hold `Ctrl` or `C` | Crouch |
 | Sprint + `Ctrl` / `C` | Slide |
-| `Space` | Jump; mantle at a valid ledge up to 0.44 m |
+| `Space` | Jump; mantle a valid ledge up to 0.44 m |
 | `Q` / `E` | Protected lean left / right |
 | `Esc` | Release pointer lock and pause |
 | Menu buttons | Resume, restart, advance operation, or change quality |
 
-## Requirements and installation
+## Quick start
+
+Requirements:
 
 - Node.js **20.19.0 or newer**
 - npm
 - A desktop browser with JavaScript, WebGL2, pointer lock, keyboard, and mouse
 
-Install the locked dependencies:
-
 ```bash
+git clone https://github.com/YiTaChen/fps_sol_one_shot.git
+cd fps_sol_one_shot
 npm ci
-```
-
-The automated checks need Playwright Chromium or an installed Google Chrome. If
-Chromium is unavailable:
-
-```bash
-npx playwright install chromium
-```
-
-## Run locally
-
-```bash
 npm run dev
 ```
 
-Vite binds to `127.0.0.1`; the usual URL is
-`http://127.0.0.1:5173`, although it may select another free port.
+Open `http://127.0.0.1:5173`. Vite may select the next free port if 5173 is
+already occupied.
 
-A reproducible normal-game URL is:
+For a reproducible high-quality run:
 
 ```text
 http://127.0.0.1:5173/?seed=20364033&quality=high
 ```
 
-Valid quality values are `low`, `medium`, and `high`. Normal play defaults to
-High.
+Valid quality values are `low`, `medium`, and `high`.
 
-## Production build
+### Production build
 
 ```bash
 npm run build
 npx vite preview
 ```
 
-The ES2022 production bundle is written to `dist/`, includes source maps, and
-separates Three.js into its own chunk. There is currently no `npm run preview`
-alias.
+The ES2022 build is written to `dist/`, includes source maps, and separates
+Three.js into its own chunk.
 
-## Quality presets
+## AI-agent-assisted development
 
-| Preset | Render scale | DPR cap | Shadow map | SSAO / bloom | Fog range |
-|---|---:|---:|---:|---|---:|
-| Low | 82% | 1.0 | 1024 | Off | 84 |
-| Medium | 100% | 1.25 | 1536 | On | 105 |
-| High | 100% | 1.75 | 2048 | On, stronger bloom | 128 |
+The project was built in two directed development passes on **2026-07-28** and
+**2026-07-29** with an OpenAI Codex coding agent. The author supplied the
+creative brief, acceptance criteria, play-test feedback, and product decisions;
+the agent implemented the systems, drove browser verification, generated
+evidence, and committed each completed milestone to GitHub.
 
-Effect pools also respond to quality changes. Procedural material textures are
-selected at startup: 128 px on Low and 256 px on Medium/High.
+| Milestone | Scope delivered | Commit evidence |
+|---|---|---|
+| Engine foundation | Fixed-step loop, deterministic RNG streams, event bus, renderer, input, diagnostics | [`6d9273c`](https://github.com/YiTaChen/fps_sol_one_shot/commit/6d9273c) |
+| Complete combat loop | Player controller, rifle, projectiles, enemies, world, UI, audio, victory and defeat | [`044cf73`](https://github.com/YiTaChen/fps_sol_one_shot/commit/044cf73) |
+| Visual and combat polish | Architecture, weapon and soldier rigs, materials, effects, spatial feedback | [`e1714d6`](https://github.com/YiTaChen/fps_sol_one_shot/commit/e1714d6) |
+| Quality hardening | Hero art, collision, browser checks, deterministic captures, performance and visual review | [`914fdc6`](https://github.com/YiTaChen/fps_sol_one_shot/commit/914fdc6), [`49ed58f`](https://github.com/YiTaChen/fps_sol_one_shot/commit/49ed58f) |
+| Fair enemy combat | Directional vision, LOS, reaction delay, gradual tracking, spread, return fire, corpse lifecycle | [`1653804`](https://github.com/YiTaChen/fps_sol_one_shot/commit/1653804) |
+| Safe traversal | Strict capsule collision, grounded low-step rules, tall-wall and jump bypass prevention | [`53606ba`](https://github.com/YiTaChen/fps_sol_one_shot/commit/53606ba) |
+| Endless operations | Same-map enemy reseeding, safe spawns, `7 × operation` scaling, local highest record | [`eed7b24`](https://github.com/YiTaChen/fps_sol_one_shot/commit/eed7b24) |
+
+The iteration loop mirrored the
+[`3d-battle-documentaries`](https://github.com/YiTaChen/3d-battle-documentaries)
+workflow: implement a visible milestone, exercise it in a real browser, inspect
+screenshots and diagnostics, add deterministic regression coverage, then commit
+and push before beginning the next stage. Git history records the milestones;
+exact agent token totals and complete wall-clock time are not encoded in the
+repository, so they are not estimated here.
 
 ## Architecture
 
@@ -127,52 +185,44 @@ lifecycle:
 main.js
 └── Game
     ├── core: fixed clock, named RNG streams, events, diagnostics
-    ├── rendering: world scene, viewmodel scene, light and post-processing
+    ├── rendering: world scene, viewmodel scene, lights, post-processing
     ├── materials + world: generated maps, architecture, props, colliders
     ├── player + physics: capsule, slopes, jump, slide, mantle, lean
-    ├── rifle + projectiles + effects
+    ├── rifle + projectiles + pooled effects
     ├── enemy director + procedural soldier rigs
     ├── Web Audio synthesis
-    └── DOM HUD and screens
+    └── DOM HUD, menus, progression, and result screens
 ```
 
-Important properties:
+Key engineering properties:
 
-- Gameplay uses a deterministic `1 / 60 s` fixed step.
-- Rendering presentation is interpolated separately from simulation.
+- Gameplay simulation runs at a deterministic fixed step and rendering is
+  interpolated separately.
 - World and first-person weapon render through separate scenes and cameras.
-- Sibling systems communicate through an event bus.
-- Named RNG streams isolate world dressing, AI, spread, effects, and audio.
-- Each operation derives a deterministic combat seed without rebuilding the
-  authored world.
-- Restart resets the match without recreating the renderer, AudioContext, or
-  global listeners.
-- Capsule stepping is limited to 0.44 m (roughly one quarter of standing
-  height); vertical collision resolves only when a floor or ceiling plane was
-  actually crossed.
-- Hot systems reuse cached geometry/materials and fixed effect pools.
+- Sibling systems communicate through a small synchronous event bus.
+- Named RNG streams isolate world dressing, AI, weapon spread, effects, and
+  audio variation.
+- Restart reuses the renderer, AudioContext, DOM shell, and global listeners.
+- Geometry, materials, and hot combat effects use shared resources and fixed
+  pools.
 
 The runtime catalogs 12 building specifications, 8 façade families, 4
-enterable interiors, 34 architectural modules, 40 prop archetypes, 19 material
-families, and a 12-enemy active-combat cap. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for the full contract.
+enterable interiors, 34 architectural modules, 40 prop archetypes, and 19
+material families. The full technical contract is in
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-## Procedural assets
+## Quality presets
 
-Runtime construction uses profiled, extruded, lathed, rounded, capsule, and
-instanced geometry; seeded color/normal/roughness maps; code-built architecture,
-interiors, props, rifle, hands, and soldiers; and ACES/sRGB rendering with
-shadows, fog, SSAO, bloom, and a custom color-grade pass.
+| Preset | Render scale | DPR cap | Shadow map | SSAO / bloom | Fog range |
+|---|---:|---:|---:|---|---:|
+| Low | 82% | 1.0 | 1024 | Off | 84 |
+| Medium | 100% | 1.25 | 1536 | On | 105 |
+| High | 100% | 1.75 | 2048 | On, stronger bloom | 128 |
 
-Combat effects use fixed pools for muzzle flashes, tracers, shells, particles,
-and decals. Audio uses oscillators, generated noise buffers, convolution
-ambience, HRTF positioning, and material-specific impact synthesis.
+Effect pools also respond to quality changes. Procedural material textures are
+128 px on Low and 256 px on Medium/High.
 
-The map is not endlessly randomized: it is a deliberately authored layout whose
-assembly, variants, materials, dressing, and simulation are seeded and
-deterministic.
-
-## Validation
+## Validation and evidence
 
 ```bash
 npm run build
@@ -181,121 +231,58 @@ npm run capture
 npm run profile
 ```
 
-### Browser smoke suite
+| Evidence | Result |
+|---|---|
+| Production build | Vite build succeeds with 47 transformed modules |
+| Contract and browser suite | **22/22 passed in 267.35 s** |
+| Enemy AI contract | 35° cone boundary, 2–4 s reaction, aim lag, mixed spread hits/misses |
+| Physics contract | 10 high-wall, low-step, ceiling, airborne, landing, and controller cases |
+| Progression contract | Hostile storage input, monotonic records, deterministic operation seeds |
+| Full gameplay loop | Real two-way combat, victory, Operation 2 with 14 total / 12 active, defeat, restart |
+| Browser diagnostics | Zero console errors, page errors, failed requests, or HTTP errors |
+| Capture set | 7 deterministic 1440×810 views with hashes and zero browser errors |
 
-`npm test` runs 22 contract and browser-level checks covering the 35° vision
-boundary, 2–4 second reaction, non-perfect spread, gradual aim tracking, corpse
-fall/despawn, ten low-step/high-wall collision cases, hostile local-storage
-input, boot, movement, jump/crouch/slide/lean, continuous slopes, pause, resize,
-weapons, two-way combat, victory, operation scaling and safe randomized spawns,
-defeat, deterministic restarts, pointer-lock loss, and diagnostics.
+Evidence files:
 
-Final result: **22/22 passed in 267.35 seconds**, including Operation 2 at 14
-total enemies / 12 active, with zero console errors, page errors, failed
-requests, or HTTP errors.
+- [`artifacts/tests/smoke-report.json`](artifacts/tests/smoke-report.json)
+- [`artifacts/captures/manifest.json`](artifacts/captures/manifest.json)
+- [`artifacts/performance/moving-combat.json`](artifacts/performance/moving-combat.json)
+- [`artifacts/visual-review.md`](artifacts/visual-review.md)
 
-Report: `artifacts/tests/smoke-report.json`
+The recorded performance profile runs headless Chromium through SwiftShader
+software WebGL. It completed the full moving-combat workload but did **not**
+meet the 45 FPS target on that runner, so it is preserved as automation evidence
+rather than presented as representative hardware-GPU performance.
 
-### Deterministic captures
-
-`npm run capture` generates seven High-quality 1440×810 views:
-
-```text
-artifacts/captures/
-├── 01-wide-street.png
-├── 02-facade-close.png
-├── 03-interior.png
-├── 04-weapon-hip.png
-├── 05-weapon-ads.png
-├── 06-enemy.png
-├── 07-active-combat.png
-└── manifest.json
-```
-
-The final manifest is `mode: full`, contains seven SHA-256 hashes, and records
-zero browser errors. The active-combat view verifies a real projectile hit
-before saving; the final run recorded target health `100 → 24.4`, player health
-`100 → 60.48`, one consumed round, 96 particles, 2 tracers, 5 decals, and one
-shell.
-
-Generate selected views with:
+### Reproducing selected evidence
 
 ```bash
 FPS_CAPTURE_VIEWS=wide-street,active-combat npm run capture
-```
-
-A filtered run writes `manifest.partial.json`; a complete run writes
-`manifest.json`. `FPS_CAPTURE_SEED` and `FPS_CAPTURE_DIR` are also supported.
-
-### Moving-combat profile
-
-`npm run profile` performs 120 warm-up frames followed by 600 measured real
-browser frames at Medium quality and a requested 1280×720 drawing buffer. It
-requires at least 5 m of accumulated movement, 30 shots, one reload, active play
-at completion, correct resolution, and zero browser errors.
-
-Report: `artifacts/performance/moving-combat.json`
-
-| Metric | Result |
-|---|---:|
-| Median FPS | `0.23` |
-| Median frame time | `4315.4 ms` |
-| p95 frame time | `5310.6 ms` |
-| p99 frame time | `5912.3 ms` |
-| Maximum frame time | `8850.1 ms` |
-| Frames over 50 / 100 ms | `599 / 599` |
-| Accumulated movement / displacement | `75.76 m / 45.58 m` |
-| Shots / reloads | `60 / 2` |
-| Target ≥45 median FPS | **Not met on this runner** |
-
-The run completed all 600 samples at the exact 1280×720 drawing buffer, ended
-in active play after 10 simulated seconds, and reported zero browser errors.
-Headless Chrome's SwiftShader GPU process was the limiting environment: this is
-an intentionally unfavorable software-rendering result, not a measurement of
-the target modern-laptop hardware GPU. The raw 600-sample array and runner
-metadata are preserved in the JSON report.
-
-Automation starts a temporary Vite server at `127.0.0.1:4173`. To reuse a
-running server:
-
-```bash
 FPS_BASE_URL=http://127.0.0.1:5173 npm test
 ```
 
-The same variable works with capture and profile.
+`FPS_CAPTURE_SEED`, `FPS_CAPTURE_DIR`, and the same `FPS_BASE_URL` override are
+supported by the capture and profile scripts.
 
-## Honest visual assessment
+<details>
+<summary><strong>Scope and known limitations</strong></summary>
 
-The final independent pixel review found visible gains in weapon geometry,
-enemy equipment, façade construction, interior dressing, material scale, and
-combat readability. It nevertheless scored every visual category below the
-prompt's strict 4/5 acceptance threshold. Simplified primitives, hard edges,
-mannequin-like anatomy/hand contact, repetitive surfaces, a few visibly floating
-goods, and the active-combat canopy composition remain.
-
-The result is a coherent, complete procedural FPS prototype, but the captures do
-not support claiming professional military-FPS art quality. Full scores and
-per-image evidence are in
-[artifacts/visual-review.md](artifacts/visual-review.md).
-
-## Known limitations
-
-- WebGL2 and desktop pointer-lock controls are required; touch and gamepad
-  controls are not implemented.
-- This is a single-player, single-map, single-rifle game. Operations scale
-  indefinitely on the same authored district rather than introducing new maps.
-- Highest-operation persistence is local and intentionally stores no sensitive
-  data. It is not tamper-proof against DevTools, extensions, or local profile
-  modification; authoritative anti-cheat would require a backend.
-- Browser audio begins only after a user gesture.
+- Desktop WebGL2 and pointer-lock controls are required; touch, gamepad, and
+  accessibility-specific input modes are not implemented.
+- The game is single-player, single-map, and single-rifle. Operations scale on
+  the same authored district rather than adding new maps.
+- Highest-operation persistence stores no sensitive data and is not tamper-proof
+  against DevTools, extensions, or local browser-profile modification.
+- Browser audio starts only after a user gesture.
 - Live quality switching does not regenerate procedural material textures.
-- Smoke, capture, and profile scripts exercise source through Vite; run
-  `npm run build` separately to validate the production bundle.
-- Capture hashes document outputs but are not pixel-diff regression tests.
-- The profiler forces headless Chromium through SwiftShader software WebGL. Its
-  results are reproducible runner measurements, not a hardware-GPU laptop
-  benchmark.
-- The 45 FPS target is recorded as `targetMet`; missing it does not make the
-  profile command exit unsuccessfully.
-- Vite assumes root-path hosting; subpath deployment requires an appropriate
+- The visual review found a coherent procedural prototype, but not professional
+  military-FPS art quality. Remaining weaknesses include simplified forms,
+  mannequin-like anatomy and hand contact, repetitive surfaces, and a few
+  visibly floating props.
+- Capture hashes document generated outputs; they are not pixel-diff regression
+  tests.
+- Vite assumes root-path hosting. Subpath deployment requires an appropriate
   `base` setting.
+- No license has been granted in this repository.
+
+</details>
