@@ -5,7 +5,8 @@ Fight through a code-generated industrial market with projectile ballistics,
 reactive combat AI, advanced first-person movement, endless operations, and
 synthesized spatial audio.
 
-**▶ [Run locally](#quick-start)** · **[Explore the gameplay](#gameplay)** ·
+**▶ [Play online](https://fps-gpt56-one-shot.web.app)** · **[Run locally](#quick-start)** ·
+**[Explore the gameplay](#gameplay)** ·
 **[See how it was built](#ai-agent-assisted-development)** ·
 **[Review the evidence](#validation-and-evidence)**
 
