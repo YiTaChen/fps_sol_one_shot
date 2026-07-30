@@ -14,6 +14,20 @@ export const EnemyState = Object.freeze({
   DEAD: 'dead',
 });
 
+export const ENEMY_VISION_HALF_ANGLE_DEGREES = 35;
+export const ENEMY_VISION_RANGE = 38;
+export const ENEMY_ATTACK_RANGE = 36;
+export const ENEMY_REACTION_MIN = 2;
+export const ENEMY_REACTION_MAX = 4;
+export const ENEMY_INITIAL_SAFE_RADIUS = ENEMY_VISION_RANGE + 4;
+
+const ENEMY_VISION_DOT = Math.cos(
+  THREE.MathUtils.degToRad(ENEMY_VISION_HALF_ANGLE_DEGREES),
+);
+const DETECTION_CONFIRM_SECONDS = 0.32;
+const CORPSE_DESPAWN_SECONDS = 8;
+const ACTIVE_ENEMY_LIMIT = 12;
+
 const DEFAULT_SPAWNS = Object.freeze([
   [-21, 0, -18, 0.5],
   [-9, 0, -34, -0.2],
@@ -49,6 +63,18 @@ const tmpDown = new THREE.Vector3(0, -1, 0);
 const tmpMuzzle = new THREE.Vector3();
 const tmpForward = new THREE.Vector3();
 const tmpLineOrigin = new THREE.Vector3();
+const tmpAimRight = new THREE.Vector3();
+const tmpAimUp = new THREE.Vector3();
+const tmpDesiredVelocity = new THREE.Vector3();
+const tmpPlayerFoot = new THREE.Vector3();
+const tmpCapsuleStart = new THREE.Vector3();
+const tmpCapsuleEnd = new THREE.Vector3();
+const tmpRayPoint = new THREE.Vector3();
+const tmpCapsulePoint = new THREE.Vector3();
+const tmpSpawnOrigin = new THREE.Vector3();
+const tmpSpawnCandidate = new THREE.Vector3();
+const tmpSpawnPosition = new THREE.Vector3();
+const tmpRay = new THREE.Ray();
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 function hashString(value) {
@@ -183,6 +209,25 @@ function normalizePhase(phase) {
   return String(phase ?? '').toLowerCase();
 }
 
+function playerCapsuleHitDistance(origin, direction, foot, height, radius) {
+  tmpCapsuleStart.copy(foot);
+  tmpCapsuleStart.y += radius;
+  tmpCapsuleEnd.copy(foot);
+  tmpCapsuleEnd.y += Math.max(radius, height - radius);
+  tmpRay.set(origin, direction);
+  const distanceSq = tmpRay.distanceSqToSegment(
+    tmpCapsuleStart,
+    tmpCapsuleEnd,
+    tmpRayPoint,
+    tmpCapsulePoint,
+  );
+  if (distanceSq > radius * radius) return Infinity;
+  const distance = origin.distanceTo(tmpRayPoint);
+  return tmpForward.subVectors(tmpRayPoint, origin).dot(direction) >= -0.001
+    ? distance
+    : Infinity;
+}
+
 export class EnemyDirector {
   constructor(options = {}) {
     this.options = options ?? {};
@@ -194,7 +239,13 @@ export class EnemyDirector {
     this.state = null;
     this.player = options.player ?? null;
     this.getPlayerSnapshot = options.getPlayerSnapshot ?? null;
-    this.enemyCount = Math.max(6, Math.min(8, options.count ?? 7));
+    this.enemyCount = Math.max(1, Math.floor(options.count ?? 7));
+    this.activeLimit = Math.max(1, Math.floor(options.activeLimit ?? ACTIVE_ENEMY_LIMIT));
+    this.totalCount = this.enemyCount;
+    this.spawnedCount = 0;
+    this.reinforcementTimer = 0;
+    this.safeRadius = Number(options.safeRadius ?? ENEMY_INITIAL_SAFE_RADIUS);
+    this.safeCenter = new THREE.Vector3();
     this.enemySpawns = [];
     this.coverPoints = [];
     this.enemies = [];
@@ -208,7 +259,9 @@ export class EnemyDirector {
     this.disposed = false;
     this._playerSnapshot = null;
     this._playerPosition = new THREE.Vector3();
+    this._playerFootPosition = new THREE.Vector3();
     this._playerVelocity = new THREE.Vector3();
+    this._playerHeight = 1.78;
     this._shotSerial = 0;
     this._lastListenerCount = 0;
     this.dynamicUnsubscribers = [];
@@ -226,13 +279,23 @@ export class EnemyDirector {
   get snapshot() {
     return {
       living: this.livingCount,
-      total: this.enemies.length,
+      total: this.totalCount,
+      spawned: this.spawnedCount,
+      queued: Math.max(0, this.totalCount - this.spawnedCount),
       enemies: this.enemies.map((enemy) => ({
         id: enemy.id,
         alive: enemy.alive,
         health: enemy.health,
         state: enemy.state,
         position: enemy.rig.root.position,
+        alerted: enemy.alerted,
+        canSeePlayer: enemy.canSeePlayer,
+        detection: enemy.detection,
+        reactionRemaining: enemy.reactionTimer,
+        aimPoint: enemy.aimPoint,
+        shotsFired: enemy.shotsFired,
+        deathTime: enemy.deathTime,
+        despawned: enemy.despawned,
       })),
     };
   }
@@ -296,16 +359,40 @@ export class EnemyDirector {
     return this;
   }
 
-  reset(seed = this.seed) {
+  reset(seed = this.seed, round = {}) {
     if (!this.sharedAssets) return;
-    this.seed = Number(seed ?? 0) >>> 0;
+    const config = seed && typeof seed === 'object' ? seed : round;
+    const configuredSeed = seed && typeof seed === 'object' ? seed.seed : seed;
+    this.seed = Number(configuredSeed ?? this.seed ?? 0) >>> 0;
     this.time = 0;
     this.paused = false;
     this._shotSerial = 0;
+    this.totalCount = Math.max(
+      1,
+      Math.floor(config.totalCount ?? config.count ?? this.enemyCount),
+    );
+    this.activeLimit = Math.max(
+      1,
+      Math.min(
+        this.totalCount,
+        Math.floor(config.activeLimit ?? this.activeLimit ?? ACTIVE_ENEMY_LIMIT),
+      ),
+    );
+    this.safeRadius = Math.max(
+      ENEMY_VISION_RANGE,
+      Number(config.safeRadius ?? this.safeRadius ?? ENEMY_INITIAL_SAFE_RADIUS),
+    );
+    const safeSource = config.playerSpawn
+      ?? config.safeCenter
+      ?? this.player?.spawnPosition
+      ?? this.player?.position;
+    if (!toVector3(safeSource, this.safeCenter)) this.safeCenter.set(-44, 0, 1.2);
+    this.spawnedCount = 0;
+    this.reinforcementTimer = 0;
 
     while (this.enemies.length) {
       const enemy = this.enemies.pop();
-      enemy.rig.dispose();
+      if (!enemy.disposed) enemy.rig.dispose();
     }
     for (let i = this.dynamicUnsubscribers.length - 1; i >= 0; i -= 1) {
       this.dynamicUnsubscribers[i]();
@@ -313,118 +400,213 @@ export class EnemyDirector {
     this.dynamicUnsubscribers.length = 0;
 
     const spawnStream = getRawStream(this.rngService, 'enemy-spawn', this.seed);
-    const spawnCount = Math.max(
-      6,
-      Math.min(this.enemyCount, this.enemySpawns.length || this.enemyCount),
-    );
+    const spawnCount = Math.min(this.totalCount, this.activeLimit);
     for (let id = 0; id < spawnCount; id += 1) {
-      const source = this.enemySpawns.length
-        ? this.enemySpawns[id % this.enemySpawns.length]
-        : DEFAULT_SPAWNS[id % DEFAULT_SPAWNS.length];
-      const spawn = this._readSpawn(source, id);
-      const visualStream = getRawStream(this.rngService, `enemy-visual:${id}`, this.seed);
-      const visualVariant = randomInt(visualStream, 0, 4);
-      const rig = createEnemySoldier(id, visualVariant, this.sharedAssets);
-      rig.root.position.copy(spawn.position);
-      rig.root.position.y += 0.015;
-      rig.root.rotation.y = spawn.yaw;
-      rig.setGround(spawn.position.y + 0.015);
-      this.root.add(rig.root);
-
-      const enemyStream = getRawStream(this.rngService, `enemy-ai:${id}`, this.seed);
-      const patrolAngle = randomRange(spawnStream, -Math.PI, Math.PI);
-      const patrolRadius = randomRange(spawnStream, 4.5, 9.5);
-      const enemy = {
-        id,
-        rig,
-        rng: enemyStream,
-        visualVariant,
-        spawnPosition: spawn.position.clone(),
-        spawnYaw: spawn.yaw,
-        alive: true,
-        health: 100,
-        state: id % 3 === 0 ? EnemyState.IDLE : EnemyState.PATROL,
-        previousState: EnemyState.IDLE,
-        stateTime: randomRange(enemyStream, 0, 0.8),
-        detection: 0,
-        alerted: false,
-        canSeePlayer: false,
-        lastSeenTime: -100,
-        lastHeardTime: -100,
-        lastSeen: spawn.position.clone(),
-        lastHeard: spawn.position.clone(),
-        destination: new THREE.Vector3(
-          spawn.position.x + Math.sin(patrolAngle) * patrolRadius,
-          spawn.position.y,
-          spawn.position.z + Math.cos(patrolAngle) * patrolRadius,
-        ),
-        patrolA: spawn.position.clone(),
-        patrolB: new THREE.Vector3(
-          spawn.position.x + Math.sin(patrolAngle) * patrolRadius,
-          spawn.position.y,
-          spawn.position.z + Math.cos(patrolAngle) * patrolRadius,
-        ),
-        cover: new THREE.Vector3(),
-        hasCover: false,
-        perceptionTimer: id * 0.027,
-        perceptionInterval: 0.14 + id * 0.006,
-        decisionTimer: randomRange(enemyStream, 0.08, 0.25),
-        reactionTimer: randomRange(enemyStream, 0.28, 0.72),
-        burstRemaining: 0,
-        shotTimer: 0,
-        reloadTimer: 0,
-        magazine: 30,
-        nextFootstep: 0,
-        moveSpeed: randomRange(enemyStream, 2.15, 2.72),
-        accuracy: randomRange(enemyStream, 0.46, 0.68),
-        suppression: 0,
-        hitReaction: 0,
-        damageDirection: new THREE.Vector3(),
-        renderMotion: 0,
-        renderAim: 0,
-        renderFire: false,
-        groundTimer: id * 0.02,
-        groundY: spawn.position.y + 0.015,
-        deathTime: 0,
-        deathTilt: randomRange(enemyStream, -1, 1),
-        collider: {
-          radius: ENEMY_CAPSULE.radius,
-          height: ENEMY_CAPSULE.height,
-          object: rig.root,
-          userData: { enemyId: id, kind: 'enemy' },
-        },
-      };
-      this.enemies.push(enemy);
-      if (typeof this.physics?.registerDynamic === 'function') {
-        const dynamicTarget = {
-          enemyId: id,
-          object: rig.root,
-          material: 'flesh',
-          get active() {
-            return enemy.alive;
-          },
-          getBounds(target) {
-            const position = rig.root.position;
-            target.min.set(position.x - 0.31, position.y, position.z - 0.31);
-            target.max.set(position.x + 0.31, position.y + 1.88, position.z + 0.31);
-            return target;
-          },
-          hitZoneAt(point) {
-            const localY = point.y - rig.root.position.y;
-            if (localY > 1.59) return 'head';
-            if (localY > 0.88) return 'torso';
-            return 'leg';
-          },
-        };
-        this.dynamicUnsubscribers.push(this.physics.registerDynamic(id, dynamicTarget));
-      }
+      this._spawnEnemy(id, spawnStream, false);
     }
 
     emit(this.events, 'ui:announce', {
-      text: `HOSTILES ACTIVE · ${this.enemies.length}`,
+      text: `HOSTILES ACTIVE · ${this.totalCount}`,
       tone: 'warning',
       duration: 2.2,
     });
+  }
+
+  _spawnEnemy(id, spawnStream, reinforcement) {
+    const spawn = this._chooseSpawn(spawnStream, id, reinforcement);
+    const visualStream = getRawStream(this.rngService, `enemy-visual:${id}`, this.seed);
+    const visualVariant = randomInt(visualStream, 0, 4);
+    const rig = createEnemySoldier(id, visualVariant, this.sharedAssets);
+    rig.root.position.copy(spawn.position);
+    rig.root.position.y += 0.015;
+    rig.root.rotation.y = spawn.yaw;
+    rig.root.visible = true;
+    rig.setGround(spawn.position.y + 0.015);
+    this.root.add(rig.root);
+
+    const enemyStream = getRawStream(this.rngService, `enemy-ai:${id}`, this.seed);
+    const patrolAngle = randomRange(spawnStream, -Math.PI, Math.PI);
+    const patrolRadius = randomRange(spawnStream, 4.5, 9.5);
+    const initialAim = new THREE.Vector3(0, 0, -12)
+      .applyAxisAngle(Y_AXIS, spawn.yaw)
+      .add(spawn.position)
+      .addScaledVector(Y_AXIS, 1.45);
+    const enemy = {
+      id,
+      rig,
+      rng: enemyStream,
+      visualVariant,
+      spawnPosition: spawn.position.clone(),
+      spawnYaw: spawn.yaw,
+      alive: true,
+      disposed: false,
+      despawned: false,
+      health: 100,
+      state: id % 3 === 0 ? EnemyState.IDLE : EnemyState.PATROL,
+      previousState: EnemyState.IDLE,
+      stateTime: randomRange(enemyStream, 0, 0.8),
+      detection: 0,
+      alerted: false,
+      canSeePlayer: false,
+      lastSeenTime: -100,
+      lastHeardTime: -100,
+      lastSeen: spawn.position.clone(),
+      lastHeard: spawn.position.clone(),
+      aimPoint: initialAim,
+      aimVelocity: new THREE.Vector3(),
+      aimAlignment: 0,
+      trackingSpeed: randomRange(enemyStream, 4.4, 5.9),
+      destination: new THREE.Vector3(
+        spawn.position.x + Math.sin(patrolAngle) * patrolRadius,
+        spawn.position.y,
+        spawn.position.z + Math.cos(patrolAngle) * patrolRadius,
+      ),
+      patrolA: spawn.position.clone(),
+      patrolB: new THREE.Vector3(
+        spawn.position.x + Math.sin(patrolAngle) * patrolRadius,
+        spawn.position.y,
+        spawn.position.z + Math.cos(patrolAngle) * patrolRadius,
+      ),
+      cover: new THREE.Vector3(),
+      hasCover: false,
+      perceptionTimer: id * 0.009,
+      perceptionInterval: 0.12 + (id % 7) * 0.005,
+      decisionTimer: randomRange(enemyStream, 0.08, 0.25),
+      reactionTimer: 0,
+      reactionDuration: 0,
+      aimSettleTimer: randomRange(enemyStream, 0.24, 0.48),
+      burstRemaining: 0,
+      burstShotIndex: 0,
+      shotsFired: 0,
+      shotTimer: 0,
+      reloadTimer: 0,
+      magazine: 30,
+      nextFootstep: 0,
+      moveSpeed: randomRange(enemyStream, 2.15, 2.72),
+      accuracy: randomRange(enemyStream, 0.46, 0.68),
+      suppression: 0,
+      hitReaction: 0,
+      damageDirection: new THREE.Vector3(),
+      renderMotion: 0,
+      renderAim: 0,
+      renderFire: false,
+      groundTimer: id * 0.006,
+      groundY: spawn.position.y + 0.015,
+      deathTime: 0,
+      deathTilt: randomRange(enemyStream, -1, 1),
+      collider: {
+        radius: ENEMY_CAPSULE.radius,
+        height: ENEMY_CAPSULE.height,
+        object: rig.root,
+        userData: { enemyId: id, kind: 'enemy' },
+      },
+    };
+    this.enemies.push(enemy);
+    this.spawnedCount += 1;
+    if (typeof this.physics?.registerDynamic === 'function') {
+      const dynamicTarget = {
+        enemyId: id,
+        object: rig.root,
+        material: 'flesh',
+        get active() {
+          return enemy.alive && !enemy.despawned;
+        },
+        getBounds(target) {
+          const position = rig.root.position;
+          target.min.set(position.x - 0.31, position.y, position.z - 0.31);
+          target.max.set(position.x + 0.31, position.y + 1.88, position.z + 0.31);
+          return target;
+        },
+        hitZoneAt(point) {
+          const localY = point.y - rig.root.position.y;
+          if (localY > 1.59) return 'head';
+          if (localY > 0.88) return 'torso';
+          return 'leg';
+        },
+      };
+      this.dynamicUnsubscribers.push(this.physics.registerDynamic(id, dynamicTarget));
+    }
+    if (reinforcement) {
+      emit(this.events, 'ui:announce', {
+        text: 'ENEMY REINFORCEMENTS',
+        tone: 'warning',
+        duration: 1.6,
+      });
+    }
+    return enemy;
+  }
+
+  _chooseSpawn(stream, id, reinforcement) {
+    const sources = this.enemySpawns.length ? this.enemySpawns : DEFAULT_SPAWNS;
+    const safeCenter = reinforcement && this._resolvePlayer()
+      ? this._playerFootPosition
+      : this.safeCenter;
+    const safeRadius = reinforcement ? 20 : this.safeRadius;
+    const minimumSpacing = reinforcement ? 3.2 : 2.3;
+    let best = null;
+    let bestDistance = -Infinity;
+
+    for (let attempt = 0; attempt < 160; attempt += 1) {
+      const sourceIndex = randomInt(stream, 0, sources.length);
+      const base = this._readSpawn(sources[sourceIndex], sourceIndex);
+      const jitter = attempt < sources.length ? 2.8 : 7.5;
+      tmpSpawnCandidate.copy(base.position);
+      tmpSpawnCandidate.x += randomRange(stream, -jitter, jitter);
+      tmpSpawnCandidate.z += randomRange(stream, -jitter, jitter);
+      tmpSpawnCandidate.x = THREE.MathUtils.clamp(tmpSpawnCandidate.x, -46, 46);
+      tmpSpawnCandidate.z = THREE.MathUtils.clamp(tmpSpawnCandidate.z, -46, 46);
+      const safeDistance = tmpSpawnCandidate.distanceTo(safeCenter);
+      if (safeDistance > bestDistance) {
+        bestDistance = safeDistance;
+        best = { position: tmpSpawnCandidate.clone(), yaw: base.yaw };
+      }
+      if (safeDistance < safeRadius) continue;
+      if (this.enemies.some((entry) =>
+        entry.alive
+        && entry.rig.root.position.distanceToSquared(tmpSpawnCandidate)
+          < minimumSpacing * minimumSpacing)) {
+        continue;
+      }
+      const grounded = this._groundSpawn(tmpSpawnCandidate, tmpSpawnPosition);
+      if (!grounded) continue;
+      if (
+        reinforcement
+        && this._lineOfSight(
+          tmpSpawnOrigin.copy(tmpSpawnPosition).addScaledVector(Y_AXIS, 1.55),
+          this._playerPosition,
+        )
+      ) {
+        continue;
+      }
+      return {
+        position: tmpSpawnPosition.clone(),
+        yaw: randomRange(stream, -Math.PI, Math.PI),
+      };
+    }
+
+    const fallback = best ?? this._readSpawn(sources[id % sources.length], id);
+    const grounded = this._groundSpawn(fallback.position, tmpSpawnPosition);
+    return {
+      position: grounded ? tmpSpawnPosition.clone() : fallback.position.clone(),
+      yaw: randomRange(stream, -Math.PI, Math.PI),
+    };
+  }
+
+  _groundSpawn(candidate, target) {
+    if (typeof this.physics?.raycast !== 'function') {
+      target.copy(candidate);
+      return true;
+    }
+    tmpSpawnOrigin.copy(candidate);
+    tmpSpawnOrigin.y = 8;
+    const hit = this.physics.raycast(tmpSpawnOrigin, tmpDown, 16, 0xffffffff);
+    const point = hitPoint(hit, tmpPoint);
+    if (!point || point.y < -0.2 || point.y > 0.82) return false;
+    const normalY = Math.abs(Number(hit?.normal?.y ?? hit?.face?.normal?.y ?? 1));
+    if (normalY < 0.72) return false;
+    target.set(candidate.x, point.y + 0.025, candidate.z);
+    return typeof this.physics?.capsuleClear !== 'function'
+      || this.physics.capsuleClear(target, ENEMY_CAPSULE);
   }
 
   _readSpawn(source, index) {
@@ -458,6 +640,19 @@ export class EnemyDirector {
       ?? this.player?.position
       ?? this.context?.camera?.position;
     if (!toVector3(source, this._playerPosition)) return false;
+    const footSource = snapshot?.position ?? this.player?.position;
+    if (!toVector3(footSource, this._playerFootPosition)) {
+      this._playerFootPosition.copy(this._playerPosition);
+      this._playerFootPosition.y -= Number(snapshot?.eyeHeight ?? 1.66);
+    }
+    this._playerHeight = Math.max(
+      1.05,
+      Number(
+        snapshot?.stanceHeight
+        ?? snapshot?.height
+        ?? (snapshot?.crouched ? 1.16 : 1.78),
+      ),
+    );
     const velocity = snapshot?.velocity;
     if (!toVector3(velocity, this._playerVelocity)) this._playerVelocity.set(0, 0, 0);
     return snapshot?.alive !== false && Number(snapshot?.health ?? 100) > 0;
@@ -466,7 +661,8 @@ export class EnemyDirector {
   fixedUpdate(dt) {
     if (this.paused || !this.context || dt <= 0) return;
     const phase = normalizePhase(this.state?.phase);
-    if (phase === 'paused' || phase === 'pause' || phase === 'victory' || phase === 'defeat') return;
+    if (phase === 'paused' || phase === 'pause') return;
+    const combatActive = phase !== 'victory' && phase !== 'defeat' && phase !== 'menu';
 
     this.time += dt;
     const playerAlive = this._resolvePlayer();
@@ -477,8 +673,16 @@ export class EnemyDirector {
         enemy.renderMotion = 0;
         enemy.renderAim = 0;
         enemy.renderFire = false;
+        if (!enemy.despawned && enemy.deathTime >= CORPSE_DESPAWN_SECONDS) {
+          enemy.despawned = true;
+          if (typeof enemy.rig.setCorpseVisibility === 'function') {
+            enemy.rig.setCorpseVisibility(false);
+          }
+          enemy.rig.root.visible = false;
+        }
         continue;
       }
+      if (!combatActive) continue;
 
       enemy.stateTime += dt;
       enemy.perceptionTimer -= dt;
@@ -492,8 +696,22 @@ export class EnemyDirector {
         this._updatePerception(enemy, enemy.perceptionInterval);
       }
 
+      this._updateAimTracking(enemy, dt);
       this._updateEnemy(enemy, dt, playerAlive);
       this._keepFeetGrounded(enemy, dt);
+    }
+
+    if (combatActive && this.spawnedCount < this.totalCount) {
+      this.reinforcementTimer -= dt;
+      if (this.livingCount < this.activeLimit && this.reinforcementTimer <= 0) {
+        const stream = getRawStream(
+          this.rngService,
+          `enemy-reinforcement:${this.spawnedCount}`,
+          this.seed,
+        );
+        this._spawnEnemy(this.spawnedCount, stream, true);
+        this.reinforcementTimer = 1.15;
+      }
     }
   }
 
@@ -501,6 +719,7 @@ export class EnemyDirector {
     if (!this.context || dt <= 0) return;
     for (let i = 0; i < this.enemies.length; i += 1) {
       const enemy = this.enemies[i];
+      if (enemy.despawned) continue;
       enemy.rig.animate(
         Math.min(dt, 1 / 20),
         enemy.renderMotion,
@@ -510,9 +729,7 @@ export class EnemyDirector {
         !enemy.alive,
       );
       if (!enemy.alive) {
-        const settle = Math.min(1, enemy.deathTime * 2.1);
-        enemy.rig.root.rotation.z = 0;
-        enemy.rig.root.position.y = enemy.groundY + 0.018 * settle;
+        enemy.rig.root.position.y = enemy.groundY;
       }
     }
   }
@@ -529,19 +746,27 @@ export class EnemyDirector {
 
     tmpForward.set(0, 0, -1).applyAxisAngle(Y_AXIS, enemy.rig.root.rotation.y);
     const forwardDot = tmpForward.dot(tmpDirection);
-    const withinCone = forwardDot > (enemy.alerted ? -0.45 : 0.35);
-    const range = enemy.alerted ? 57 : 43;
-    const visible = distance < range && withinCone && this._lineOfSight(tmpOrigin, tmpTarget);
+    const withinCone = forwardDot >= ENEMY_VISION_DOT;
+    const visible = distance <= ENEMY_VISION_RANGE
+      && withinCone
+      && this._lineOfSight(tmpOrigin, tmpTarget);
     enemy.canSeePlayer = visible;
 
     if (visible) {
-      const detectionRate = enemy.alerted ? 4.5 : THREE.MathUtils.lerp(0.55, 2.8, 1 - distance / range);
-      enemy.detection = Math.min(1, enemy.detection + interval * detectionRate);
+      enemy.detection = Math.min(
+        1,
+        enemy.detection + interval / DETECTION_CONFIRM_SECONDS,
+      );
       enemy.lastSeen.copy(this._playerPosition);
       enemy.lastSeenTime = this.time;
       if (enemy.detection >= 1 && !enemy.alerted) {
         enemy.alerted = true;
-        enemy.reactionTimer = randomRange(enemy.rng, 0.24, 0.63);
+        enemy.reactionDuration = randomRange(
+          enemy.rng,
+          ENEMY_REACTION_MIN,
+          ENEMY_REACTION_MAX,
+        );
+        enemy.reactionTimer = enemy.reactionDuration;
         this._transition(enemy, EnemyState.INVESTIGATE);
         emit(this.events, 'enemy:alert', {
           source: this,
@@ -551,8 +776,37 @@ export class EnemyDirector {
         });
       }
     } else {
-      enemy.detection = Math.max(0, enemy.detection - interval * 0.14);
+      enemy.detection = Math.max(0, enemy.detection - interval * 1.8);
     }
+  }
+
+  _updateAimTracking(enemy, dt) {
+    if (!enemy.alerted && enemy.state !== EnemyState.REACT) return;
+    const source = enemy.canSeePlayer
+      ? this._playerPosition
+      : enemy.lastSeenTime >= enemy.lastHeardTime
+        ? enemy.lastSeen
+        : enemy.lastHeard;
+    tmpTarget.copy(source);
+    if (!enemy.canSeePlayer && Math.abs(tmpTarget.y - enemy.rig.root.position.y) < 0.6) {
+      tmpTarget.y = enemy.rig.root.position.y + 1.42;
+    }
+    tmpDirection.subVectors(tmpTarget, enemy.aimPoint);
+    const distance = tmpDirection.length();
+    if (distance > 0.0001) {
+      const desiredSpeed = Math.min(enemy.trackingSpeed, distance * 2.35);
+      tmpDesiredVelocity.copy(tmpDirection).multiplyScalar(desiredSpeed / distance);
+    } else {
+      tmpDesiredVelocity.set(0, 0, 0);
+    }
+    enemy.aimVelocity.lerp(
+      tmpDesiredVelocity,
+      1 - Math.exp(-3.4 * dt),
+    );
+    if (enemy.aimVelocity.lengthSq() > enemy.trackingSpeed * enemy.trackingSpeed) {
+      enemy.aimVelocity.setLength(enemy.trackingSpeed);
+    }
+    enemy.aimPoint.addScaledVector(enemy.aimVelocity, dt);
   }
 
   _lineOfSight(origin, target) {
@@ -582,10 +836,14 @@ export class EnemyDirector {
     if (enemy.state === EnemyState.REACT) {
       enemy.renderAim = 0.4;
       enemy.renderMotion = 0;
-      if (enemy.stateTime > 0.18 + enemy.suppression * 0.08) {
+      this._faceAimPoint(enemy, dt);
+      if (enemy.stateTime > Math.max(0.65, enemy.reactionTimer)) {
         this._transition(
           enemy,
-          enemy.canSeePlayer ? EnemyState.PURSUIT : EnemyState.INVESTIGATE,
+          enemy.canSeePlayer && enemy.rig.root.position.distanceTo(this._playerPosition)
+            <= ENEMY_ATTACK_RANGE
+            ? EnemyState.AIM
+            : EnemyState.INVESTIGATE,
         );
       }
       return;
@@ -623,13 +881,26 @@ export class EnemyDirector {
         enemy.destination.copy(
           enemy.lastSeenTime >= enemy.lastHeardTime ? enemy.lastSeen : enemy.lastHeard,
         );
+        this._faceAimPoint(enemy, dt);
         if (enemy.canSeePlayer) {
-          enemy.reactionTimer -= dt;
-          if (enemy.reactionTimer <= 0) this._transition(enemy, EnemyState.PURSUIT);
-        } else if (this._moveToward(enemy, enemy.destination, enemy.moveSpeed * 0.86, dt)) {
+          enemy.reactionTimer = Math.max(0, enemy.reactionTimer - dt);
+          if (enemy.reactionTimer <= 0) {
+            enemy.aimSettleTimer = randomRange(enemy.rng, 0.18, 0.34);
+            this._transition(
+              enemy,
+              enemy.rig.root.position.distanceTo(this._playerPosition) <= ENEMY_ATTACK_RANGE
+                ? EnemyState.AIM
+                : EnemyState.PURSUIT,
+            );
+          }
+        } else if (
+          enemy.stateTime > 0.65
+          && this._moveToward(enemy, enemy.destination, enemy.moveSpeed * 0.86, dt)
+        ) {
           if (enemy.stateTime > 1.5) this._transition(enemy, EnemyState.REPOSITION);
-        } else if (enemy.stateTime > 9) {
+        } else if (enemy.stateTime > 10) {
           enemy.alerted = false;
+          enemy.reactionTimer = 0;
           this._transition(enemy, EnemyState.PATROL);
         }
         break;
@@ -641,13 +912,20 @@ export class EnemyDirector {
           this._transition(enemy, EnemyState.INVESTIGATE);
           break;
         }
-        if (distance > 21) {
+        if (enemy.canSeePlayer && distance <= ENEMY_ATTACK_RANGE) {
+          enemy.aimSettleTimer = randomRange(enemy.rng, 0.2, 0.42);
+          this._transition(enemy, EnemyState.AIM);
+        } else if (distance > ENEMY_ATTACK_RANGE * 0.82) {
           enemy.destination.copy(this._playerPosition);
           this._moveToward(enemy, enemy.destination, enemy.moveSpeed, dt);
         } else if (enemy.decisionTimer <= 0) {
           enemy.decisionTimer = randomRange(enemy.rng, 0.45, 0.9);
-          if (this._selectCover(enemy)) this._transition(enemy, EnemyState.COVER);
-          else this._transition(enemy, EnemyState.AIM);
+          if (this._selectCover(enemy) && random01(enemy.rng) < 0.42) {
+            this._transition(enemy, EnemyState.COVER);
+          } else {
+            enemy.aimSettleTimer = randomRange(enemy.rng, 0.22, 0.46);
+            this._transition(enemy, EnemyState.AIM);
+          }
         }
         break;
       }
@@ -676,11 +954,16 @@ export class EnemyDirector {
       case EnemyState.AIM:
         enemy.renderMotion = 0;
         enemy.renderAim = 1;
-        this._facePlayer(enemy, dt);
-        if (!enemy.canSeePlayer && this.time - enemy.lastSeenTime > 1.2) {
+        this._faceAimPoint(enemy, dt);
+        if (!enemy.canSeePlayer && this.time - enemy.lastSeenTime > 0.65) {
           this._transition(enemy, EnemyState.INVESTIGATE);
-        } else if (enemy.stateTime > enemy.reactionTimer) {
+        } else if (
+          enemy.canSeePlayer
+          && enemy.aimAlignment >= Math.cos(THREE.MathUtils.degToRad(11))
+          && enemy.stateTime >= enemy.aimSettleTimer
+        ) {
           enemy.burstRemaining = randomInt(enemy.rng, 2, 5);
+          enemy.burstShotIndex = 0;
           enemy.shotTimer = randomRange(enemy.rng, 0.08, 0.22);
           this._transition(enemy, EnemyState.FIRE);
         }
@@ -689,20 +972,26 @@ export class EnemyDirector {
       case EnemyState.FIRE:
         enemy.renderMotion = 0;
         enemy.renderAim = 1;
-        this._facePlayer(enemy, dt);
+        this._faceAimPoint(enemy, dt);
         enemy.shotTimer -= dt;
         if (!enemy.canSeePlayer) {
           this._transition(enemy, EnemyState.INVESTIGATE);
           break;
         }
+        if (enemy.aimAlignment < Math.cos(THREE.MathUtils.degToRad(14))) {
+          enemy.aimSettleTimer = 0.22;
+          this._transition(enemy, EnemyState.AIM);
+          break;
+        }
         if (enemy.shotTimer <= 0 && enemy.burstRemaining > 0) {
           this._fire(enemy);
           enemy.burstRemaining -= 1;
+          enemy.burstShotIndex += 1;
           enemy.shotTimer = randomRange(enemy.rng, 0.105, 0.155);
         }
         if (enemy.burstRemaining <= 0 && enemy.shotTimer <= 0) {
-          enemy.reactionTimer = randomRange(enemy.rng, 0.35, 0.72);
-          if (random01(enemy.rng) < 0.52) {
+          enemy.aimSettleTimer = randomRange(enemy.rng, 0.52, 0.94);
+          if (random01(enemy.rng) < 0.35) {
             this._transition(enemy, EnemyState.REPOSITION);
           } else {
             this._transition(enemy, EnemyState.AIM);
@@ -730,13 +1019,16 @@ export class EnemyDirector {
     }
   }
 
-  _facePlayer(enemy, dt) {
-    tmpDirection.subVectors(this._playerPosition, enemy.rig.root.position);
+  _faceAimPoint(enemy, dt) {
+    tmpDirection.subVectors(enemy.aimPoint, enemy.rig.root.position);
     tmpDirection.y = 0;
     if (tmpDirection.lengthSq() > 0.0001) {
       tmpDirection.normalize();
-      enemy.rig.faceDirection(tmpDirection, 4.8, dt);
+      enemy.rig.faceDirection(tmpDirection, 2.25, dt);
+      tmpForward.set(0, 0, -1).applyAxisAngle(Y_AXIS, enemy.rig.root.rotation.y);
+      enemy.aimAlignment = tmpForward.dot(tmpDirection);
     }
+    return enemy.aimAlignment;
   }
 
   _moveToward(enemy, destination, speed, dt) {
@@ -854,34 +1146,56 @@ export class EnemyDirector {
   _fire(enemy) {
     enemy.renderFire = true;
     enemy.magazine -= 1;
+    enemy.shotsFired += 1;
     enemy.rig.muzzleWorld(tmpMuzzle);
-    tmpTarget.copy(this._playerPosition);
-    const distance = tmpMuzzle.distanceTo(tmpTarget);
-    const movementPenalty = Math.min(0.6, this._playerVelocity.length() * 0.045);
-    const spread = THREE.MathUtils.lerp(0.055, 0.012, enemy.accuracy) *
-      (1 + movementPenalty + enemy.suppression * 0.7) *
-      Math.max(0.8, distance / 18);
-    tmpTarget.x += randomRange(enemy.rng, -spread, spread) * distance;
-    tmpTarget.y += randomRange(enemy.rng, -spread * 0.72, spread * 0.72) * distance;
-    tmpTarget.z += randomRange(enemy.rng, -spread, spread) * distance;
-    tmpDirection.subVectors(tmpTarget, tmpMuzzle).normalize();
+    tmpDirection.subVectors(enemy.aimPoint, tmpMuzzle);
+    if (tmpDirection.lengthSq() < 0.0001) {
+      tmpDirection.set(0, 0, -1).applyAxisAngle(Y_AXIS, enemy.rig.root.rotation.y);
+    } else {
+      tmpDirection.normalize();
+    }
+    tmpAimRight.crossVectors(tmpDirection, Y_AXIS);
+    if (tmpAimRight.lengthSq() < 0.0001) tmpAimRight.set(1, 0, 0);
+    else tmpAimRight.normalize();
+    tmpAimUp.crossVectors(tmpAimRight, tmpDirection).normalize();
+
+    const movementSpread = Math.min(0.009, this._playerVelocity.length() * 0.0011);
+    const angularSpread = THREE.MathUtils.lerp(0.043, 0.017, enemy.accuracy)
+      + movementSpread
+      + enemy.suppression * 0.018
+      + enemy.burstShotIndex * 0.0035;
+    const spreadRadius = Math.sqrt(random01(enemy.rng)) * angularSpread;
+    const spreadAngle = randomRange(enemy.rng, 0, Math.PI * 2);
+    tmpDirection
+      .addScaledVector(tmpAimRight, Math.cos(spreadAngle) * spreadRadius)
+      .addScaledVector(tmpAimUp, Math.sin(spreadAngle) * spreadRadius)
+      .normalize();
 
     const worldHit = typeof this.physics?.raycast === 'function'
       ? this.physics.raycast(tmpMuzzle, tmpDirection, 80, 0xffffffff)
       : null;
     const worldDistance = hitDistance(worldHit, tmpMuzzle);
     const playerDistance = tmpMuzzle.distanceTo(this._playerPosition);
-    tmpSide.subVectors(this._playerPosition, tmpMuzzle);
-    const closestAlongRay = Math.max(0, tmpSide.dot(tmpDirection));
-    tmpPoint.copy(tmpMuzzle).addScaledVector(tmpDirection, closestAlongRay);
-    const accuracyHit = tmpPoint.distanceToSquared(this._playerPosition) < 0.46 * 0.46;
-    const clearShot = accuracyHit && worldDistance >= closestAlongRay - 0.42;
+    const playerHitDistance = playerCapsuleHitDistance(
+      tmpMuzzle,
+      tmpDirection,
+      this._playerFootPosition,
+      this._playerHeight,
+      0.38,
+    );
+    const clearShot = Number.isFinite(playerHitDistance)
+      && worldDistance >= playerHitDistance - 0.04;
     const damage = randomRange(enemy.rng, 8.5, 13.5);
+    const terminalDistance = clearShot
+      ? playerHitDistance
+      : Number.isFinite(worldDistance)
+        ? Math.min(80, worldDistance)
+        : 80;
     const end = tmpMuzzle.clone().addScaledVector(
       tmpDirection,
-      Number.isFinite(worldDistance) ? Math.min(80, worldDistance) : 80,
+      terminalDistance,
     );
-    if (worldHit) hitPoint(worldHit, end);
+    if (worldHit && !clearShot) hitPoint(worldHit, end);
 
     const payload = {
       id: `enemy-${enemy.id}-${this._shotSerial++}`,
@@ -894,6 +1208,9 @@ export class EnemyDirector {
       maxDistance: 80,
       clearShot,
       targetDistance: playerDistance,
+      end: end.clone(),
+      tracerEnd: end.clone(),
+      spreadRadians: angularSpread,
     };
     emit(this.events, 'projectile:spawn', payload);
     emit(this.events, 'weapon:fire', {
@@ -902,6 +1219,7 @@ export class EnemyDirector {
       enemyId: enemy.id,
       position: tmpMuzzle.clone(),
       direction: tmpDirection.clone(),
+      tracerEnd: end.clone(),
     });
     emit(this.events, 'audio:play', {
       name: 'enemy-fire',
@@ -909,7 +1227,7 @@ export class EnemyDirector {
       volume: 0.82,
     });
     emit(this.events, 'projectile:impact', {
-      kind: worldHit ? 'world' : 'tracer-end',
+      kind: clearShot || !worldHit ? 'tracer-end' : 'world',
       source: enemy.id,
       point: end.clone(),
       position: end.clone(),
@@ -949,9 +1267,15 @@ export class EnemyDirector {
       if (enemy.rig.root.position.distanceToSquared(tmpPoint) > audibleRadius * audibleRadius) continue;
       enemy.lastHeard.copy(tmpPoint);
       enemy.lastHeardTime = this.time;
-      enemy.alerted = true;
-      enemy.detection = Math.max(enemy.detection, 0.65);
-      enemy.reactionTimer = randomRange(enemy.rng, 0.18, 0.52);
+      if (!enemy.alerted) {
+        enemy.alerted = true;
+        enemy.reactionDuration = randomRange(
+          enemy.rng,
+          ENEMY_REACTION_MIN,
+          ENEMY_REACTION_MAX,
+        );
+        enemy.reactionTimer = enemy.reactionDuration;
+      }
       if (enemy.state === EnemyState.IDLE || enemy.state === EnemyState.PATROL) {
         this._transition(enemy, EnemyState.INVESTIGATE);
       }
@@ -966,11 +1290,17 @@ export class EnemyDirector {
       if (!enemy.alive) continue;
       const distanceSq = enemy.rig.root.position.distanceToSquared(tmpPoint);
       if (distanceSq > 38 * 38) continue;
-      enemy.alerted = true;
-      enemy.detection = 1;
       enemy.lastHeard.copy(tmpPoint);
       enemy.lastHeardTime = this.time;
-      enemy.reactionTimer = randomRange(enemy.rng, 0.18, 0.56);
+      if (!enemy.alerted) {
+        enemy.alerted = true;
+        enemy.reactionDuration = randomRange(
+          enemy.rng,
+          ENEMY_REACTION_MIN,
+          ENEMY_REACTION_MAX,
+        );
+        enemy.reactionTimer = enemy.reactionDuration;
+      }
       if (enemy.state === EnemyState.IDLE || enemy.state === EnemyState.PATROL) {
         this._transition(enemy, EnemyState.INVESTIGATE);
       }
@@ -1027,6 +1357,8 @@ export class EnemyDirector {
       enemy.detection = 1;
       enemy.lastSeen.copy(this._playerPosition);
       enemy.lastSeenTime = this.time;
+      enemy.reactionDuration = randomRange(enemy.rng, 0.72, 1.18);
+      enemy.reactionTimer = enemy.reactionDuration;
       this._transition(enemy, EnemyState.REACT);
     }
     return true;
@@ -1044,6 +1376,9 @@ export class EnemyDirector {
     enemy.renderAim = 0;
     enemy.rig.deathSide = enemy.deathTilt;
     this._transition(enemy, EnemyState.DEAD);
+    if (this.spawnedCount < this.totalCount) {
+      this.reinforcementTimer = Math.max(this.reinforcementTimer, 2.2);
+    }
     const point = hit?.point ?? hit?.position ?? enemy.rig.root.position;
     emit(this.events, 'enemy:death', {
       enemyId: enemy.id,

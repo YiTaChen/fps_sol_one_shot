@@ -750,14 +750,17 @@ export function createEnemySoldier(id, visualVariant, assets) {
   root.name = `enemy-soldier-${id}`;
   root.userData.enemyId = id;
   root.userData.enemyRoot = true;
+  const bodyRoot = new THREE.Group();
+  bodyRoot.name = `enemy-soldier-${id}-body`;
+  root.add(bodyRoot);
 
   const pelvis = mesh(geometry.pelvis, palette.clothDark, 'pelvis');
   pelvis.position.y = 0.91;
-  root.add(pelvis);
+  bodyRoot.add(pelvis);
 
   const torsoPivot = new THREE.Group();
   torsoPivot.position.y = 1.22;
-  root.add(torsoPivot);
+  bodyRoot.add(torsoPivot);
   const torso = mesh(geometry.torso, palette.cloth, 'combat-shirt');
   const vest = mesh(geometry.vest, palette.armour, 'layered-armour-vest');
   vest.position.z = -0.005;
@@ -860,7 +863,7 @@ export function createEnemySoldier(id, visualVariant, assets) {
     const upperPivot = new THREE.Group();
     upperPivot.name = side < 0 ? 'left-leg' : 'right-leg';
     upperPivot.position.set(side * 0.125, 0.9, 0);
-    root.add(upperPivot);
+    bodyRoot.add(upperPivot);
     const upper = mesh(geometry.legUpper, palette.cloth, 'tailored-trouser-thigh');
     upper.position.y = -0.212;
     upperPivot.add(upper);
@@ -987,6 +990,7 @@ export function createEnemySoldier(id, visualVariant, assets) {
   contactShadow.position.y = 0.012;
   contactShadow.renderOrder = 1;
   root.add(contactShadow);
+  const deathAxis = new THREE.Vector3();
 
   const ownedGeometries = [
     ...straps.map((strap) => strap.geometry),
@@ -998,6 +1002,7 @@ export function createEnemySoldier(id, visualVariant, assets) {
 
   const rig = {
     root,
+    bodyRoot,
     torsoPivot,
     headPivot,
     leftLeg,
@@ -1012,7 +1017,9 @@ export function createEnemySoldier(id, visualVariant, assets) {
     recoil: 0,
     hit: 0,
     death: 0,
+    deathTime: 0,
     deathSide: 0,
+    corpseVisibility: 1,
     aimWeight: 0,
     lastGroundY: 0,
     setGround(y) {
@@ -1022,30 +1029,113 @@ export function createEnemySoldier(id, visualVariant, assets) {
     setPose(pose) {
       this.pose = pose;
     },
+    setCorpseVisibility(visibility = true) {
+      const raw = typeof visibility === 'boolean' ? (visibility ? 1 : 0) : Number(visibility);
+      const amount = THREE.MathUtils.clamp(Number.isFinite(raw) ? raw : 1, 0, 1);
+      const scale = THREE.MathUtils.lerp(0.84, 1, THREE.MathUtils.smoothstep(amount, 0, 1));
+      this.corpseVisibility = amount;
+      bodyRoot.visible = amount > 0.001;
+      bodyRoot.scale.setScalar(amount > 0.001 ? scale : 0.001);
+      contactShadow.visible = amount > 0.001;
+      contactShadowMaterial.opacity = 0.28 * amount;
+      return this;
+    },
     animate(dt, motion = 0, aim = 0, firing = false, hit = 0, dead = false) {
       this.stride += dt * (2.2 + motion * 7.5);
       this.recoil = THREE.MathUtils.damp(this.recoil, firing ? 1 : 0, 23, dt);
       this.hit = THREE.MathUtils.damp(this.hit, hit, 13, dt);
-      this.death = THREE.MathUtils.damp(this.death, dead ? 1 : 0, 5.2, dt);
       this.aimWeight = THREE.MathUtils.damp(this.aimWeight, aim, 8.5, dt);
 
-      if (this.death > 0.02) {
-        const fall = this.death;
-        pelvis.rotation.x = fall * 0.18;
-        pelvis.rotation.y = fall * this.deathSide * 0.18;
-        pelvis.rotation.z = fall * this.deathSide * 0.22;
-        torsoPivot.rotation.x = -0.08 - fall * 0.72;
-        torsoPivot.rotation.z = fall * (0.28 + this.deathSide * 0.94);
-        headPivot.rotation.x = fall * 0.32;
-        leftArm.shoulder.rotation.set(-0.25, 0, 0.55 + fall);
-        rightArm.shoulder.rotation.set(-0.18, 0, -0.5 - fall * 0.5);
-        leftLeg.upperPivot.rotation.x = 0.24 * fall;
-        rightLeg.upperPivot.rotation.x = -0.32 * fall;
-        rifle.rotation.x = 0.1 + fall * 0.72;
-        rifle.rotation.z = -fall * 0.42;
-        contactShadow.scale.setScalar(1 + fall * 0.5);
+      if (dead) {
+        this.deathTime += Math.max(0, dt);
+        const kneel = THREE.MathUtils.smoothstep(this.deathTime, 0, 0.25);
+        const fall = THREE.MathUtils.smoothstep(this.deathTime, 0.22, 1.2);
+        const settle = THREE.MathUtils.smoothstep(this.deathTime, 1.02, 1.2);
+        const sideSign = this.deathSide < 0 ? -1 : 1;
+        const sideWeight = THREE.MathUtils.lerp(
+          0.2,
+          0.78,
+          THREE.MathUtils.clamp(Math.abs(this.deathSide), 0, 1),
+        );
+        const forwardWeight = Math.sqrt(Math.max(0, 1 - sideWeight * sideWeight));
+        const groundLift = THREE.MathUtils.lerp(
+          1.05,
+          0.66,
+          THREE.MathUtils.inverseLerp(0.2, 0.78, sideWeight),
+        );
+        this.death = THREE.MathUtils.clamp(this.deathTime / 1.2, 0, 1);
+
+        // Keep the world-facing yaw and grounded root untouched. The body first
+        // buckles at the knees, then rotates around its feet into a weighted
+        // forward/side fall instead of remaining as an upright bent mannequin.
+        deathAxis.set(-forwardWeight, 0, -sideSign * sideWeight).normalize();
+        bodyRoot.position.set(
+          sideSign * fall * 0.035,
+          Math.sin(fall * Math.PI * 0.5) * groundLift + fall * 0.07 - settle * 0.012,
+          -fall * 0.035,
+        );
+        bodyRoot.quaternion.setFromAxisAngle(deathAxis, fall * Math.PI * 0.49);
+
+        leftLeg.upperPivot.position.set(-0.125, 0.9 - kneel * 0.11, -kneel * 0.035);
+        rightLeg.upperPivot.position.set(0.125, 0.9 - kneel * 0.15, kneel * 0.04);
+        leftLeg.upperPivot.rotation.set(0.18 + kneel * 0.36, 0.045, -0.035);
+        rightLeg.upperPivot.rotation.set(-0.08 + kneel * 0.28, -0.04, 0.04);
+        leftLeg.knee.rotation.set(0.08 + kneel * 0.82, 0, -sideSign * fall * 0.08);
+        rightLeg.knee.rotation.set(0.08 + kneel * 1.02, 0, sideSign * fall * 0.06);
+
+        pelvis.position.y = 0.91 - kneel * 0.13;
+        pelvis.rotation.set(
+          kneel * 0.16,
+          sideSign * kneel * 0.09,
+          sideSign * kneel * 0.12,
+        );
+        torsoPivot.position.set(
+          sideSign * kneel * 0.018,
+          1.22 - kneel * 0.14,
+          kneel * 0.018,
+        );
+        torsoPivot.rotation.set(
+          -0.08 - kneel * 0.58,
+          -sideSign * fall * 0.08,
+          sideSign * (kneel * 0.24 + fall * 0.2),
+        );
+        headPivot.position.y = 0.485;
+        headPivot.rotation.set(
+          kneel * 0.24 + fall * 0.18,
+          -sideSign * fall * 0.18,
+          sideSign * fall * 0.12,
+        );
+
+        leftArm.shoulder.rotation.set(-0.25 - fall * 0.18, 0.08, 0.55 + fall * 0.62);
+        rightArm.shoulder.rotation.set(-0.18 + fall * 0.16, -0.05, -0.5 - fall * 0.42);
+        leftArm.elbow.rotation.set(-0.22 - fall * 0.28, 0, -0.08);
+        rightArm.elbow.rotation.set(-0.35 - fall * 0.2, 0, 0.06);
+        leftArm.hand.rotation.set(-0.72, -0.08, 0.22 + fall * 0.18);
+        rightArm.hand.rotation.set(-0.28, 0.13, -0.18 - fall * 0.16);
+
+        rifle.position.set(
+          0.055 + sideSign * fall * 0.025,
+          0.08 + kneel * 0.12,
+          -0.205 + fall * 0.035,
+        );
+        rifle.rotation.set(
+          0.1 + kneel * 0.52 + fall * 0.16,
+          -0.045 - sideSign * fall * 0.12,
+          -sideSign * fall * 0.38,
+        );
+        contactShadow.position.y = -root.position.y + this.lastGroundY - 0.003;
+        contactShadow.scale.set(
+          1 + fall * 1.35,
+          1 + fall * 0.28,
+          1,
+        );
         return;
       }
+
+      this.death = 0;
+      this.deathTime = 0;
+      bodyRoot.position.set(0, 0, 0);
+      bodyRoot.quaternion.identity();
 
       const gait = Math.sin(this.stride);
       const gaitOpposite = Math.sin(this.stride + Math.PI);

@@ -341,10 +341,15 @@ export class Effects {
     listen(this.events, 'projectile:spawn', (event) => {
       if (event?.kind !== 'enemy') return;
       const origin = event?.origin ?? event?.position;
+      const explicitEnd = event?.tracerEnd ?? event?.end;
+      if (vectorLike(origin) && vectorLike(explicitEnd)) {
+        this.spawnTracer(origin, explicitEnd, 'enemy');
+        return;
+      }
       const direction = event?.direction ?? event?.velocity;
       if (!vectorLike(origin) || !vectorLike(direction)) return;
       DIRECTION.copy(direction).normalize();
-      const distance = Math.min(32, Number(event?.targetDistance ?? event?.maxDistance ?? 26));
+      const distance = Math.min(45, Number(event?.targetDistance ?? event?.maxDistance ?? 26));
       TRACER_ENDPOINT.copy(origin).addScaledVector(DIRECTION, distance);
       this.spawnTracer(origin, TRACER_ENDPOINT, 'enemy');
     }, this._disposers);
@@ -532,9 +537,9 @@ export class Effects {
     const tracer = this._claimTimed(this.tracers, this.tracerLimit);
     tracer.active = true;
     tracer.age = 0;
-    tracer.life = kind === 'enemy' ? 0.12 : 0.105;
+    tracer.life = kind === 'enemy' ? 0.18 : 0.105;
     SEGMENT.subVectors(b, a);
-    const length = Math.min(22, SEGMENT.length());
+    const length = Math.min(kind === 'enemy' ? 45 : 22, SEGMENT.length());
     if (length <= 0.001) {
       tracer.active = false;
       return false;
