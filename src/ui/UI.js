@@ -214,10 +214,10 @@ function subscribe(events, name, handler) {
   return () => {};
 }
 
-function element(tag, className, html) {
+function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (html !== undefined) node.innerHTML = html;
+  if (text !== undefined) node.textContent = text;
   return node;
 }
 

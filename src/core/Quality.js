@@ -35,6 +35,8 @@ export const QUALITY_PRESETS = Object.freeze({
 });
 
 export function resolveQuality(name) {
-  return QUALITY_PRESETS[name] || QUALITY_PRESETS.high;
+  return Object.hasOwn(QUALITY_PRESETS, name)
+    ? QUALITY_PRESETS[name]
+    : QUALITY_PRESETS.high;
 }
 
