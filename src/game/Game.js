@@ -37,17 +37,32 @@ const ACTIVE_ENEMY_LIMIT = 12;
 const DEFAULT_KIT = Object.freeze({ primary: "vesper", secondary: "sidearm", melee: "melee" });
 const WEAPON_KEYS = Object.freeze({ Digit1: "primary", Digit2: "secondary", Digit3: "melee" });
 const THROWABLE_KEYS = Object.freeze({ Digit4: "pulse", Digit5: "haze", Digit6: "stasis" });
+const WEAPON_CATEGORIES = {
+  vesper: "Assault rifle",
+  smg: "Submachine gun",
+  precision: "Scoped sniper",
+  sidearm: "Light sidearm",
+  "heavy-sidearm": "Heavy sidearm",
+  melee: "Melee",
+};
 const ARMORY_CATALOG = [
   ...Object.values(WEAPON_DEFINITIONS).map((item) => ({
     id: item.id, slot: item.slot, label: item.name, price: item.cost, detail: item.description,
-    spec: item.melee ? 'No ammunition' : `${item.magazineCapacity} rounds per magazine`,
+    category: WEAPON_CATEGORIES[item.id],
+    facts: [
+      ["Action", item.melee ? "Swing" : item.boltCycle ? "Bolt action"
+        : item.automatic ? "Automatic" : "Semi-auto"],
+      ["Magazine", item.melee ? "None" : `${item.magazineCapacity} rounds`],
+      ["Movement", `${Math.round((item.mobility ?? 1) * 100)}%`],
+    ],
   })),
   ...Object.values(THROWABLES).map((item) => ({
     id: item.id, kind: "throwable", label: item.label, price: item.price,
-    detail: item.detail ?? item.description, max: item.max ?? 2,
+    category: "Throwable", detail: item.detail ?? item.description, max: item.max ?? 2,
   })),
   {
     id: "reserve-case", kind: "service", label: "Reserve Case", price: 180,
+    category: "Ammunition service",
     detail: "Refills reserve ammunition for every owned firearm. Magazines still need a reload.",
   },
 ];

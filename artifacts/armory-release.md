@@ -14,6 +14,12 @@
 
 主選單點 **Armory** 可先選裝。部署後用 **B** 開啟附近的安全軍械庫。**1／2／3** 切換主武器、副武器、近戰。**4／5／6** 選擇 Pulse、Haze、Stasis，再按 **T** 投出。完整價格在 README。 [裝備與價格](../README.md#armory-and-credits) · [商店實際畫面](demo/armory.webp)
 
+### 商品辨識與購買
+
+CS2 將裝備集中在單一選購格，VALORANT 在商店保留武器詳情，Warzone 的購買介面用道具圖示與數量加快查找。 [CS2 更新](https://store.steampowered.com/news/app/730/view/3702568031467145905) · [VALORANT 更新](https://playvalorant.com/en-gb/news/game-updates/valorant-patch-notes-1-0/) · [Warzone 更新](https://www.callofduty.com/patchnotes/2025/03/call-of-duty-bo6-warzone-season-03-patch-notes)
+
+Cinderline 將十件商品分組顯示，每張商品圖可開啟檢視。拖曳可旋轉遊戲模型，購買按鈕同步顯示價格、已裝備、點數不足或攜帶上限。武器詳情列出射擊模式、彈匣容量與移動速度，投擲物會顯示攜帶數量。點商品圖不會扣點。
+
 ### 驗證
 
 - 使用相同的固定步模擬驗證六款武器的模型、連發與單發、狙擊鏡循環、切換時的彈藥及近戰遮擋。

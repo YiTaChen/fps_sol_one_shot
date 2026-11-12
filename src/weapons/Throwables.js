@@ -44,6 +44,49 @@ const GRAVITY = 14;
 const SKY = new THREE.Vector3(0, 1, 0);
 const DOWN = new THREE.Vector3(0, -1, 0);
 
+function createOrbHardware() {
+  return {
+    coreGeometry: new THREE.IcosahedronGeometry(0.145, 1),
+    ringGeometry: new THREE.TorusGeometry(1, 0.019, 6, 40),
+    shellMaterial: new THREE.MeshStandardMaterial({
+      color: 0x263845, roughness: 0.44, metalness: 0.5,
+    }),
+  };
+}
+
+function createOrbMesh({ coreGeometry, ringGeometry, shellMaterial }, lensMaterial) {
+  const orb = new THREE.Group();
+  const shell = new THREE.Mesh(coreGeometry, shellMaterial);
+  const lens = new THREE.Mesh(coreGeometry, lensMaterial);
+  lens.scale.setScalar(0.68);
+  lens.position.set(0, 0.098, 0);
+  orb.add(shell, lens);
+  for (const axis of [0, Math.PI * 0.5]) {
+    const rail = new THREE.Mesh(ringGeometry, lensMaterial);
+    rail.scale.setScalar(0.163);
+    rail.rotation.x = axis;
+    orb.add(rail);
+  }
+  return orb;
+}
+
+export function createThrowableInspectionModel(id) {
+  if (!Object.hasOwn(THROWABLES, id)) return null;
+  const item = THROWABLES[id];
+  const hardware = createOrbHardware();
+  const lens = new THREE.MeshBasicMaterial({ color: item.color, toneMapped: false });
+  const root = createOrbMesh(hardware, lens);
+  root.name = item.label;
+  return {
+    root,
+    dispose() {
+      root.removeFromParent();
+      for (const resource of Object.values(hardware)) resource.dispose();
+      lens.dispose();
+    },
+  };
+}
+
 function cloudTexture() {
   const size = 48;
   const data = new Uint8Array(size * size * 4);
@@ -76,15 +119,9 @@ export class Throwables {
     this.root.name = 'Orb projectors';
     context.scene.add(this.root);
 
-    this.coreGeometry = new THREE.IcosahedronGeometry(0.145, 1);
-    this.ringGeometry = new THREE.TorusGeometry(1, 0.019, 6, 40);
+    Object.assign(this, createOrbHardware());
     this.waveGeometry = new THREE.IcosahedronGeometry(1, 2);
     this.hazeTexture = cloudTexture();
-    this.shellMaterial = new THREE.MeshStandardMaterial({
-      color: 0x263845,
-      roughness: 0.44,
-      metalness: 0.5,
-    });
     this.stasisMaterial = new THREE.MeshBasicMaterial({
       color: THROWABLES.stasis.color,
       toneMapped: false,
@@ -109,19 +146,8 @@ export class Throwables {
     root.visible = false;
     this.root.add(root);
 
-    const orb = new THREE.Group();
     const lensMaterial = new THREE.MeshBasicMaterial({ toneMapped: false });
-    const shell = new THREE.Mesh(this.coreGeometry, this.shellMaterial);
-    const lens = new THREE.Mesh(this.coreGeometry, lensMaterial);
-    lens.scale.setScalar(0.68);
-    lens.position.set(0, 0.098, 0);
-    orb.add(shell, lens);
-    for (const axis of [0, Math.PI * 0.5]) {
-      const rail = new THREE.Mesh(this.ringGeometry, lensMaterial);
-      rail.scale.setScalar(0.163);
-      rail.rotation.x = axis;
-      orb.add(rail);
-    }
+    const orb = createOrbMesh(this, lensMaterial);
     root.add(orb);
     const trailHistory = new Float32Array(TRAIL_POINTS * 3);
     const trailGeometry = new THREE.BufferGeometry();

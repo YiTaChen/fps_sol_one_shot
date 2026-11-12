@@ -1,6 +1,6 @@
 {
   "status": "passed",
-  "durationMs": 9292.471597,
+  "durationMs": 12532.307168,
   "results": [
     {
       "name": "physics step contract",
@@ -145,7 +145,7 @@
     {
       "name": "browser armory and combat",
       "status": "passed",
-      "detail": "purchase, credits, scope, reload-free switching, melee, and throwing"
+      "detail": "10 item images, free inspection, purchase, scope, switching, melee, and throwing"
     },
     {
       "name": "console and page errors",
@@ -164,7 +164,7 @@
     "medianFrameMs": 50.00000074505806,
     "p95FrameMs": 250,
     "medianFps": 19.99999970197678,
-    "elapsedMs": 7638.700000000186,
+    "elapsedMs": 10704.299999999814,
     "counters": {
       "listeners": 83,
       "enemies": 5,
@@ -177,7 +177,7 @@
         "textures": 98
       },
       "render": {
-        "frame": 3342,
+        "frame": 4654,
         "calls": 0,
         "triangles": 0,
         "points": 0,
@@ -190,7 +190,7 @@
         "textures": 98
       },
       "render": {
-        "frame": 3342,
+        "frame": 4654,
         "calls": 0,
         "triangles": 0,
         "points": 0,

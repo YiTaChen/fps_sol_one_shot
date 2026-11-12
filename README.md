@@ -72,9 +72,11 @@ competitive progression would require a backend.
 
 ## Armory and credits
 
-Open **Armory** on the main menu to outfit a Relay Run before deploying. Press
-**B** at the deployment locker or at a powered relay when nearby hostiles have
-been cleared. Each new run starts with **1,400 credits**. An elimination earns
+Open **Armory** on the main menu to outfit a Relay Run before deploying. Select
+an item image to see its details and in-game model. Drag the model or use the
+rotation controls to inspect it. The separate purchase button shows the price
+and availability. Press **B** at the deployment locker or at a powered relay
+when nearby hostiles have been cleared. Each new run starts with **1,400 credits**. An elimination earns
 125, a restored relay earns 250, and an operation clear earns 400. Credits and
 owned weapons carry into the next Endless Sweep operation. A retry restores
 the opening loadout for the current operation and resets rewards earned during

@@ -40,6 +40,8 @@ export function runArmoryContract() {
 
 export async function runBrowserArmoryContract(page) {
   const show = (name) => page.locator(`[data-screen="${name}"]`);
+  const armory = show('armory');
+  const inspector = armory.locator('.cl-armory-inspector');
   const state = () => page.evaluate(() => window.__FPS_TEST__.state());
   await page.evaluate(() => window.__CINDERLINE__.events.emit('game:menu'));
   await show('start').locator('[data-action="armory-deploy"]').click();
@@ -47,10 +49,42 @@ export async function runBrowserArmoryContract(page) {
   assert.equal((await state()).economy.credits, 1400);
   assert(await show('armory').locator('[data-buy="reserve-case"]').isDisabled());
 
-  for (const id of ['precision', 'pulse', 'haze', 'stasis']) {
+  const opening = (await state()).economy;
+  const products = armory.locator('[data-inspect]');
+  assert.equal(await products.count(), 10);
+  const thumbnails = await products.locator('img').evaluateAll(async (images) => {
+    await Promise.all(images.map((image) => image.decode()));
+    return images.map((image) => [image.naturalWidth, image.naturalHeight, image.src]);
+  });
+  assert.equal(new Set(thumbnails.map((image) => image[2])).size, 10);
+  assert(thumbnails.every(([width, height]) => width === 480 && height === 240));
+
+  for (const product of await products.all()) {
+    const id = await product.getAttribute('data-inspect');
+    await product.click();
+    assert.equal(await product.getAttribute('aria-pressed'), 'true');
+    assert.equal(await inspector.getAttribute('data-inspected'), id);
+    assert.equal(await inspector.locator('[data-inspect-name]').textContent(), await product.textContent());
+    assert((await inspector.locator('[data-inspect-type]').textContent()).length > 0);
+    assert.deepEqual((await state()).economy, opening);
+    const visual = await inspector.getAttribute('data-preview');
+    assert(['model', 'image'].includes(visual));
+    if (visual === 'image') assert(await inspector.locator('.cl-armory-fallback').isVisible());
+  }
+  await armory.locator('[data-inspect="precision"]').click();
+  assert.match(await inspector.locator('.cl-armory-facts').textContent(), /5 rounds/);
+  await inspector.locator('[data-inspect-buy]').click();
+  assert.equal(await inspector.getAttribute('data-inspected'), 'precision');
+  assert.equal(await inspector.locator('[data-inspect-state]').textContent(), 'Equipped');
+  for (const id of ['pulse', 'haze', 'stasis']) {
     await show('armory').locator(`[data-buy="${id}"]`).click();
   }
   assert(await show('armory').locator('[data-buy="heavy-sidearm"]').isDisabled());
+  await armory.locator('[data-inspect="heavy-sidearm"]').click();
+  assert.equal(await inspector.getAttribute('data-inspected'), 'heavy-sidearm');
+  assert.equal(await inspector.locator('[data-inspect-buy]').textContent(), 'Need 300');
+  assert(await inspector.locator('[data-inspect-buy]').isDisabled());
+  assert.equal((await state()).economy.credits, 10);
   await show('armory').locator('[data-action="armory-close"]').click();
   const first = await state();
   assert.equal(first.phase, 'playing');

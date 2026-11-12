@@ -513,7 +513,7 @@ async function main() {
     pass('short click and same-step aim', `yaw difference ${relay.yawError.toFixed(4)} rad`);
 
     await runBrowserArmoryContract(page);
-    pass('browser armory and combat', 'purchase, credits, scope, reload-free switching, melee, and throwing');
+    pass('browser armory and combat', '10 item images, free inspection, purchase, scope, switching, melee, and throwing');
 
     const internalDiagnostics = await page.evaluate(
       () => window.__FPS_TEST__.diagnostics(),

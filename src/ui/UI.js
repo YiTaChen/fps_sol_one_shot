@@ -696,6 +696,7 @@ export class UI {
   setScreen(name, data = {}) {
     const canonical = name === 'play' || name === 'game' ? 'playing' : name;
     this._updateProgression(data);
+    if (this.screen === 'armory' && canonical !== 'armory') this.armory.close();
     this.screen = canonical;
     this.root.querySelectorAll('[data-screen]').forEach((screen) => {
       screen.classList.toggle('is-visible', screen.dataset.screen === canonical);

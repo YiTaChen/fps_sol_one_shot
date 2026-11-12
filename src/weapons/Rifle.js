@@ -945,9 +945,10 @@ export class Rifle {
     const metalRough = makeTexture([112, 112, 112], 48, 'weapon-metal-r', true);
     const polymerMap = makeTexture([57, 62, 62], 10, 'weapon-polymer');
     const polymerRough = makeTexture([172, 172, 172], 34, 'weapon-polymer-r', true);
-    const gloveMap = makeTexture([73, 84, 70], 24, 'weapon-glove');
-    const gloveRough = makeTexture([205, 205, 205], 26, 'weapon-glove-r', true);
-    this._textures.push(metalMap, metalRough, polymerMap, polymerRough, gloveMap, gloveRough);
+    const gloveMap = this.options.inspection ? null : makeTexture([73, 84, 70], 24, 'weapon-glove');
+    const gloveRough = this.options.inspection ? null : makeTexture([205, 205, 205], 26, 'weapon-glove-r', true);
+    this._textures.push(metalMap, metalRough, polymerMap, polymerRough);
+    if (gloveMap && gloveRough) this._textures.push(gloveMap, gloveRough);
 
     const gunmetal = new THREE.MeshPhysicalMaterial({
       map: metalMap,
@@ -1047,9 +1048,11 @@ export class Rifle {
       this.variant = buildVariantModel(this.weapon, this.options.id, {
         gunmetal, darkMetal, exposedMetal, railMetal, accentMetal, polymer, rubber, opticGlass, reticle,
       }, { roundedPart, cylinderPart, sideProfileGeometry });
-      this._buildHands(glove, sleeve, rubber);
-      if (!this.variant.support) this.leftHand.visible = false;
-      else this.leftHand.position.copy(this.variant.support);
+      if (!this.options.inspection) {
+        this._buildHands(glove, sleeve, rubber);
+        if (!this.variant.support) this.leftHand.visible = false;
+        else this.leftHand.position.copy(this.variant.support);
+      }
       this.weapon.traverse(setShadow);
       return;
     }
@@ -1506,7 +1509,7 @@ export class Rifle {
     }
     roundedPart(this.weapon, new THREE.Vector3(0.004, 0.025, 0.082), new THREE.Vector3(-0.054, 0.018, 0), exposedMetal, 0.0015, 1, 'receiver-wear-plate');
 
-    this._buildHands(glove, sleeve, rubber);
+    if (!this.options.inspection) this._buildHands(glove, sleeve, rubber);
     this.weapon.traverse(setShadow);
   }
 
@@ -1778,6 +1781,13 @@ export class Rifle {
     this.camera = null;
     this.viewCamera = null;
   }
+}
+
+export function createWeaponInspectionModel(id) {
+  if (!Object.hasOwn(WEAPON_DEFINITIONS, id)) return null;
+  const rifle = new Rifle({ id, inspection: true, projectiles: { capacity: 0 } });
+  rifle._buildModel();
+  return { root: rifle.root, dispose: () => rifle.dispose() };
 }
 
 export default Rifle;
