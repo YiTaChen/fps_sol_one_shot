@@ -15,9 +15,10 @@ spatial audio. Endless Sweep is available from the main menu.
   <br><sub><b>High-quality capture:</b> active combat rendered in the high quality preset.</sub>
 </p>
 
-The runtime downloads no models, textures, images, or audio samples. Buildings,
-interiors, props, PBR maps, the rifle, hands, soldiers, effects, ambience, and
-sound effects are all constructed from code.
+The Ash Exchange exterior and North Service condenser are Blender meshes. Seven
+surface families use authored PBR maps. The remaining architecture, equipment,
+characters, effects and audio are generated at runtime. The mesh and textures
+ship with the build. [Material provenance](artifacts/material-provenance.md)
 
 ## At a glance
 
@@ -28,7 +29,7 @@ sound effects are all constructed from code.
 | **World** | Authored Ash Market layout with deterministic procedural assembly and dressing |
 | **Simulation** | Fixed `1 / 60 s` gameplay step with isolated seeded RNG streams |
 | **Modes** | Relay Run and Endless Sweep with `7 × operation` total hostiles |
-| **Asset policy** | No downloaded models, textures, images, or audio samples at runtime |
+| **Assets** | Blender exterior mesh, authored PBR textures and procedural world assets |
 
 ## Gameplay
 
@@ -38,8 +39,13 @@ Choose **Deploy** to restore the relays in Saffron Arcade, North Service and
 Kiln House, then reach the marked Cross Street extraction post. The HUD shows
 the next location, distance and a route hint. Hold **F** at each station until
 the progress bar fills. Leaving the station, releasing the key, getting hit
-or pausing cancels the current hold. Activating a relay draws nearby patrols
-toward the station, so moving on and clearing enemies are both viable.
+or pausing cancels the current hold.
+
+Restoring power opens the arcade service shutter, then the Kiln freight shutter,
+and finally lights the Cross Street extraction beacon. Each relay also charges
+a remote decoy. Press **G** when you want the last powered station to emit an
+audible signal after a short delay. Up to two eligible patrols can investigate
+its location while you move through a different route.
 
 ### Endless Sweep
 
@@ -127,6 +133,7 @@ camera sway settings, saved in the browser.
 | `Space` | Jump; mantle a valid ledge up to 0.44 m |
 | `Q` / `E` | Protected lean left / right |
 | Hold `F` | Operate the active relay or extract |
+| `G` | Queue the decoy at the last powered station |
 | `Esc` | Release pointer lock and pause |
 | Menu buttons | Resume, restart, advance operation, or change quality |
 
@@ -195,6 +202,9 @@ repository, so they are not estimated here.
 The November 2026 update uses the public Claude Fable 5.2 demo Saltline as a
 reference for lighting, composition, interaction feedback, and level pacing.
 See the [comparison and implementation review](artifacts/saltline-comparison.md).
+The Ash Exchange follow-up added an in-engine opening composition, powered
+service shutters and a decoy the player can time. The Blender source script
+for the two exterior assets is [build-exchange-asset.py](scripts/build-exchange-asset.py).
 
 ## Architecture
 
@@ -240,7 +250,8 @@ material families. The full technical contract is in
 | High | 100% | 1.75 | 2048 | On, stronger bloom | 128 |
 
 Effect pools also respond to quality changes. Procedural material textures are
-128 px on Low and 256 px on Medium/High. Medium is the default for normal play.
+128 px on Low and 256 px on Medium/High. The authored surfaces keep their
+baked resolution across presets. Medium is the default for normal play.
 
 ## Validation and evidence
 

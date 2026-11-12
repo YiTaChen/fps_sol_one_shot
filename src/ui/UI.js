@@ -39,6 +39,21 @@ const UI_STYLES = `
     radial-gradient(circle at 72% 48%, rgba(186,120,42,.11), transparent 45%);
 }
 .cl-screen.is-visible { display:grid; overflow:auto; }
+.cl-start {
+  background:linear-gradient(90deg, rgba(4,9,12,.96), rgba(4,9,12,.8) 27%, rgba(4,9,12,.15) 61%, transparent 85%),
+    linear-gradient(0deg, rgba(4,9,12,.74), transparent 35%);
+}
+.cl-start .cl-panel { grid-template-columns:minmax(360px, 1fr) minmax(245px, .48fr); }
+.cl-start .cl-panel::before { display:none; }
+.cl-start .cl-title { font-size:clamp(68px, 9vw, 130px); line-height:.76; letter-spacing:-.07em; }
+.cl-start .cl-controls { align-self:end; padding:14px 16px; }
+.cl-start .cl-controls[open] { background:rgba(8,15,19,.91); }
+.cl-start .cl-controls summary {
+  color:var(--cl-ink); cursor:pointer; font-size:10px; font-weight:700; line-height:1.5; letter-spacing:.13em;
+}
+.cl-start .cl-controls[open] summary { margin-bottom:13px; }
+.cl-start .cl-controls summary::marker { color:var(--cl-accent); }
+.cl-start .cl-controls summary:focus-visible { outline:1px solid var(--cl-accent); outline-offset:4px; }
 .cl-panel {
   width:min(1120px, calc(100vw - 80px)); min-height:min(640px, calc(100vh - 70px));
   display:grid; grid-template-columns:minmax(360px, 1.15fr) minmax(270px, .65fr);
@@ -150,6 +165,14 @@ const UI_STYLES = `
 .cl-interact kbd { display:inline-block; padding:1px 5px; margin-right:5px; border:1px solid #8c9da1; color:var(--cl-accent); }
 .cl-interact-meter { margin-top:6px; height:3px; background:#293338; overflow:hidden; }
 .cl-interact-meter i { display:block; height:100%; background:var(--cl-accent); transform-origin:left; }
+.cl-decoy {
+  position:absolute; left:32px; bottom:106px; display:flex; gap:9px; align-items:center;
+  padding:6px 9px; color:#bcf3f4; background:rgba(8,20,26,.88);
+  border-left:2px solid #79dbe9; font-size:10px; line-height:1.15; letter-spacing:.10em;
+}
+.cl-decoy[hidden] { display:none; }
+.cl-decoy kbd { color:#e4fbff; border:1px solid #76a9af; padding:2px 4px; }
+.cl-decoy.is-queued { border-color:var(--cl-accent); color:#f8ce92; }
 .cl-bottom-left { position:absolute; left:32px; bottom:27px; display:flex; align-items:flex-end; gap:18px; }
 .cl-health-mark {
   width:62px; height:62px; display:grid; place-items:center; position:relative;
@@ -224,6 +247,9 @@ const UI_STYLES = `
 @media (max-width: 760px) {
   .cl-panel { width:calc(100vw - 44px); grid-template-columns:1fr; gap:28px; align-content:center; }
   .cl-panel { padding:30px 0; } .cl-controls { display:none; } .cl-pause .cl-controls { display:block; }
+  .cl-start .cl-panel { grid-template-columns:1fr; }
+  .cl-start .cl-controls { display:block; max-width:340px; }
+  .cl-decoy { left:18px; }
   .cl-bottom-left{left:18px}.cl-bottom-right{right:18px} .cl-topbar{width:min(94vw,560px)}
 }
 `;
@@ -334,17 +360,17 @@ export class UI {
       <section class="cl-screen cl-start" data-screen="start" aria-label="Start screen">
         <div class="cl-panel">
           <div>
-            <div class="cl-kicker">ASH MARKET · INDUSTRIAL QUARTER</div>
+            <div class="cl-kicker">ASH MARKET</div>
             <h1 class="cl-title">CINDER<br>LINE<small>ONE SHOT</small></h1>
-            <p class="cl-mission">Restore three relays across Ash Market and reach the extraction point.</p>
+            <p class="cl-mission">Restore the district power network, use the service routes it opens, and reach Cross Street.</p>
             <div class="cl-record" data-highest-cleared hidden></div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="start">Deploy</button>
               <button class="cl-btn" data-action="sweep">Endless sweep</button>
             </div>
           </div>
-          <div class="cl-controls">
-            <h2>Field controls</h2>
+          <details class="cl-controls">
+            <summary>Controls and settings</summary>
             <div class="cl-control"><kbd>W A S D</kbd><span>Move through the district</span></div>
             <div class="cl-control"><kbd>Mouse · LMB</kbd><span>Aim · fire</span></div>
             <div class="cl-control"><kbd>RMB · R</kbd><span>Aim down sight · reload</span></div>
@@ -352,6 +378,7 @@ export class UI {
             <div class="cl-control"><kbd>Space</kbd><span>Jump / mantle</span></div>
             <div class="cl-control"><kbd>Q · E</kbd><span>Lean left · right</span></div>
             <div class="cl-control"><kbd>Hold F</kbd><span>Operate a relay or extract</span></div>
+            <div class="cl-control"><kbd>G</kbd><span>Send a decoy to the last powered relay</span></div>
             <div class="cl-control"><kbd>Esc</kbd><span>Pause / release pointer lock</span></div>
             <h2 style="margin-top:22px">Render profile</h2>
             <div class="cl-quality" role="group" aria-label="Graphics quality">
@@ -360,7 +387,7 @@ export class UI {
               <button data-quality="high">High</button>
             </div>
             ${CONTROL_FIELDS}
-          </div>
+          </details>
         </div>
       </section>
       <section class="cl-screen cl-pause" data-screen="pause" aria-label="Pause screen">
@@ -426,6 +453,7 @@ export class UI {
           <div class="cl-route" hidden><span class="cl-route-arrow" aria-hidden="true">▲</span><span data-route-label></span><span class="cl-route-distance" data-route-distance></span></div>
           <p class="cl-route-hint" data-route-hint hidden></p>
         </div>
+        <div class="cl-decoy" hidden><kbd>G</kbd><span data-decoy-label></span></div>
         <div class="cl-bottom-left">
           <div class="cl-health-mark" style="--health-angle:360deg"><span class="cl-health-value" data-health>100</span></div>
           <div class="cl-health-label"><span>Condition</span><b data-condition>Operational</b></div>
@@ -484,6 +512,8 @@ export class UI {
     this.nodes.interact = query('.cl-interact');
     this.nodes.interactLabel = query('[data-interact-label]');
     this.nodes.interactFill = query('.cl-interact-meter i');
+    this.nodes.decoy = query('.cl-decoy');
+    this.nodes.decoyLabel = query('[data-decoy-label]');
     this.nodes.pauseMessage = query('[data-pause-message]');
 
     this.root.querySelectorAll('[data-action]').forEach((button) => {
@@ -706,6 +736,12 @@ export class UI {
 
   _renderMission(mission, player, yaw) {
     const target = mission?.target;
+    const decoy = mission?.decoy;
+    const queued = decoy?.remaining > 0;
+    this.nodes.decoy.hidden = !target || !(decoy?.ready || queued);
+    this.nodes.decoy.classList.toggle('is-queued', queued);
+    if (decoy?.ready) this._text('decoyLabel', `Decoy · ${decoy.label}`);
+    if (queued) this._text('decoyLabel', `Signal in ${decoy.remaining.toFixed(1)} s`);
     const active = Boolean(target);
     this.nodes.sweepProgress.hidden = Boolean(mission);
     this.nodes.relayProgress.hidden = !mission;

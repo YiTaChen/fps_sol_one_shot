@@ -6,7 +6,7 @@ const ROUTE = [
     id: 'arcade',
     code: '01',
     label: 'Saffron Arcade',
-    description: 'Enter under the amber sign. The relay is in the back room.',
+    description: 'Enter the exchange under the amber sign and pass the switchgear.',
     accent: '#ffc36a',
     position: [-41.25, 0, -17.2],
     console: [-39.5, 0, -17.2],
@@ -16,7 +16,7 @@ const ROUTE = [
     id: 'service',
     code: '02',
     label: 'North Service',
-    description: 'Use the arcade’s rear door and follow the service road east.',
+    description: 'Take the rear door or the powered side shutter, then head east.',
     accent: '#77e4ec',
     position: [18, 0, -29.1],
     console: [19.65, 0, -29.1],
@@ -45,7 +45,8 @@ const ROUTE = [
 ];
 
 const SIGNS = [
-  ['arcade', 'SAFFRON ARCADE', 'MARKET ENTRANCE', -43.15, 3.82, -5.55, 0, 3.28],
+  ['arcade', 'SAFFRON ARCADE', 'DISTRICT POWER EXCHANGE', -43.15, 3.82, -5.55, 0, 3.28],
+  ['arcade', 'SWITCHGEAR', '01 • POWER DISTRIBUTION', -36.57, 2.91, -12.55, 0, 2.94],
   ['arcade', 'NORTH EXIT', 'SERVICE ROAD', -41.25, 2.73, -21.76, 0, 2.06],
   ['service', 'NORTH SERVICE', 'RELAY • LOADING ROAD', 19.65, 2.27, -29.1, -Math.PI * 0.5, 2.48],
   ['kiln', 'KILN HOUSE', 'NORTH FREIGHT GATE', 38.8, 3.05, -23.19, Math.PI, 3.15],
@@ -159,6 +160,16 @@ export class DistrictRoute {
         this.box(station, this.hardware, [0.075, 0.74, 0.075], [side * 0.29, 1.65, -0.045]);
       }
     }
+    if (location.id === 'extraction') {
+      this.box(station, this.hardware, [0.105, 1.15, 0.105], [0, 2.74, -0.08]);
+      const beacon = this.own(new THREE.MeshBasicMaterial({ color: 0x284c3a, toneMapped: false }));
+      this.box(station, this.casing, [0.3, 0.28, 0.3], [0, 3.3, -0.08]);
+      this.box(station, beacon, [0.32, 0.14, 0.32], [0, 3.32, -0.08]);
+      const light = new THREE.PointLight(0x7cfea9, 0, 7, 1.7);
+      light.position.set(0, 3.35, -0.08);
+      station.add(light);
+      this.extractionSignal = { beacon, light };
+    }
 
     colliders.push(createBoxCollider({
       id: station.name,
@@ -253,7 +264,8 @@ export class DistrictRoute {
     const marks = new THREE.InstancedMesh(this.geometry.beveledBox(0.14, 0.013, 0.68), material, markings.length);
     const transform = new THREE.Object3D();
     markings.forEach(([x, z, yaw], index) => {
-      transform.position.set(x, 0.047, z);
+      const raisedDeck = location.id === 'arcade' && z < -6.28;
+      transform.position.set(x, raisedDeck ? 0.079 : 0.047, z);
       transform.rotation.y = yaw;
       transform.updateMatrix();
       marks.setMatrixAt(index, transform.matrix);
@@ -269,6 +281,12 @@ export class DistrictRoute {
     for (const [id, { material, accent }] of this.indicators) {
       material.color.copy(accent).multiplyScalar(id === activeId ? 1 : completed.has(id) ? 0.54 : 0.23);
     }
+  }
+
+  setExtractionPowered(powered) {
+    const { beacon, light } = this.extractionSignal;
+    beacon.color.setHex(powered ? 0x97ffb5 : 0x284c3a);
+    light.intensity = powered ? 22 : 0;
   }
 
   dispose() {

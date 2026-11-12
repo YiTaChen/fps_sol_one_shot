@@ -8,6 +8,7 @@ import {
 import { GeometryKit, InstanceBatcher, createBeveledMesh } from './geometry/GeometryKit.js';
 import { PROP_ARCHETYPES, PropFactory } from './PropFactory.js';
 import { DistrictRoute } from './DistrictRoute.js';
+import { buildSaffronExchange } from './SaffronExchange.js';
 import {
   addCoverPoint,
   createBoxCollider,
@@ -27,6 +28,8 @@ const BUILDING_SPECS = Object.freeze([
     family: 'marketArcade',
     enterable: true,
     rearPassage: { x: -2.25, width: 2.45 },
+    atrium: true,
+    poweredShutter: { stage: 1, side: 1, z: -4.4, width: 2.75, height: 2.75, label: 'Saffron maintenance shutter' },
     variant: 0,
   },
   {
@@ -61,6 +64,7 @@ const BUILDING_SPECS = Object.freeze([
     family: 'brickWarehouse',
     enterable: true,
     rearPassage: { x: 3.8, width: 3.2 },
+    poweredShutter: { stage: 2, side: -1, z: 3.25, width: 2.65, height: 2.65, label: 'Kiln west loading shutter' },
     freightEntry: true,
     variant: 3,
   },
@@ -156,10 +160,10 @@ const BUILDING_SPECS = Object.freeze([
 
 const HERO_PROP_PLACEMENTS = Object.freeze([
   ['market-stall', -27, 0.02, -3.9, 0, 1],
-  ['display-shelf', -40.5, 0.02, -10.5, Math.PI, 0.9],
-  ['produce-crate', -45.15, 0.02, -5.15, 0.08, 0.9],
-  ['produce-basket', -40.75, 0.02, -5.1, -0.1, 0.9],
-  ['sack-stack', -35.25, 0.02, -5.15, Math.PI * 0.5, 0.78],
+  ['tool-cabinet', -40.5, 0.02, -10.5, Math.PI, 0.84],
+  ['tool-cabinet', -45.55, 0.02, -5.12, 0.08, 0.75],
+  ['cable-spool', -40.7, 0.02, -5.06, -0.1, 0.79],
+  ['electrical-cabinet', -35.25, 0.02, -5.39, Math.PI * 0.5, 0.85],
   ['hand-cart', -32.45, 0.02, -4.95, 0.12, 0.82],
   ['planter', -43.6, 0.02, 4.85, 0, 0.9],
   ['bench', -40.8, 0.02, 4.75, Math.PI, 0.86],
@@ -215,18 +219,6 @@ const HERO_PROP_PLACEMENTS = Object.freeze([
 ]);
 
 const INTERIOR_RECIPES = Object.freeze({
-  'saffron-arcade': [
-    ['display-shelf', -4.8, -3.9, Math.PI * 0.5, 0.82],
-    ['display-shelf', 4.8, -3.9, -Math.PI * 0.5, 0.82],
-    ['market-table', 0.8, -2.2, 0, 0.9],
-    ['produce-crate', -0.15, -4.8, 0.2, 0.85],
-    ['produce-basket', 1.8, -4.6, -0.2, 0.85],
-    ['sack-stack', 4.1, 1.8, Math.PI * 0.5, 0.8],
-    ['stool', -1.1, 1.5, 0, 0.85],
-    ['produce-crate', -2.6, 3.55, -0.08, 0.88],
-    ['produce-basket', -1.45, 3.5, 0.12, 0.86],
-    ['fabric-bale', 5.35, 2.85, Math.PI * 0.5, 0.78],
-  ],
   'kestrel-workshop': [
     ['workbench', 3.6, -4.7, Math.PI, 0.9],
     ['tool-cabinet', 5.2, -2.1, -Math.PI * 0.5, 0.85],
@@ -337,6 +329,9 @@ export class WorldBuilder {
     this.surfaceZones = [];
     this.interiorLights = [];
     this.districtRoute = null;
+    this.poweredShutters = [];
+    this.powerLights = [];
+    this.powerStage = 0;
     this.worldData = null;
   }
 
@@ -400,6 +395,15 @@ export class WorldBuilder {
     this.placeRepeatedStreetDressing(dressingRng);
     this.scatterInstancedDetails(dressingRng);
     this.districtRoute = new DistrictRoute(this);
+    if (context.assets?.exchangeAsset) {
+      this.colliders.push(createBoxCollider({
+        id: 'north-service-condenser',
+        center: new THREE.Vector3(26.55, 0.73, -24.58),
+        size: new THREE.Vector3(3.42, 1.46, 1.79),
+        material: 'metal',
+        tags: ['architecture', 'service-equipment'],
+      }));
+    }
     this.batcher.flush();
     this.registerPhysics(context.physics);
     context.scene.add(this.root);
@@ -407,6 +411,10 @@ export class WorldBuilder {
     const spawn = Object.freeze({
       position: new THREE.Vector3(-44, 0.02, 1.2),
       yaw: -Math.PI * 0.5,
+    });
+    const relaySpawn = Object.freeze({
+      position: new THREE.Vector3(-44.16, 0.02, 3.6),
+      yaw: -0.106,
     });
     const enemySpawns = this.createEnemySpawns();
     const capturePoses = Object.freeze({
@@ -439,11 +447,13 @@ export class WorldBuilder {
     this.worldData = {
       root: this.root,
       spawn,
+      relaySpawn,
       enemySpawns,
       colliders: this.colliders,
       coverPoints: this.coverPoints,
       route: this.districtRoute.relays,
       extraction: this.districtRoute.extraction,
+      setPowerStage: (stage) => this.setPowerStage(stage),
       setRouteStatus: (activeId, completedIds) => this.districtRoute.setStatus(activeId, completedIds),
       materialAt,
       capturePoses,
@@ -703,6 +713,7 @@ export class WorldBuilder {
         height: raw.stories * 3.15 + layoutRng.range(-0.08, 0.16),
       };
       const building = this.architecture.buildBuilding(spec);
+      if (spec.poweredShutter) this.addPoweredShutter(building);
       this.surfaceZones.push({
         id: `floor:${building.spec.id}`,
         minX: building.spec.position.x - building.spec.width * 0.5 + 0.3,
@@ -791,6 +802,87 @@ export class WorldBuilder {
     }
   }
 
+  addPoweredShutter(building) {
+    const { spec, group } = building;
+    const { stage, side, z, width, height, label } = spec.poweredShutter;
+    const x = (side * spec.width) / 2;
+    const slot = this.geometryKit.corrugatedPanel(height - 0.035, width + 0.05, 0.12, 31);
+    const shutterMaterial = this.materials.get('paintedMetal').clone();
+    shutterMaterial.side = THREE.DoubleSide;
+    const shutter = new THREE.Mesh(slot, shutterMaterial);
+    shutter.name = `power-shutter:${spec.id}`;
+    shutter.position.set(x, height * 0.5, z);
+    shutter.rotation.set(0, Math.PI * 0.5, Math.PI * 0.5, 'YXZ');
+    shutter.castShadow = true;
+    shutter.receiveShadow = true;
+    group.add(shutter);
+
+    for (const edge of [-1, 1]) {
+      this.architecture.addInstance(spec, 'bareMetal',
+        _size.set(0.53, height, 0.13), _local.set(x, height * 0.5, z + edge * (width * 0.5 + 0.063)),
+        { module: 'door-frame' });
+    }
+    this.architecture.addInstance(spec, 'rustedMetal',
+      _size.set(0.66, 0.39, width + 0.39), _local.set(x, height + 0.18, z),
+      { module: 'rolling-shutter' });
+
+    const indicatorMaterial = new THREE.MeshBasicMaterial({ color: 0x873323, toneMapped: false });
+    const indicator = new THREE.Mesh(this.geometryKit.beveledBox(0.73, 0.095, 0.88), indicatorMaterial);
+    indicator.position.set(x, height + 0.15, z);
+    group.add(indicator);
+
+    const center = localToWorld(shutter.position, spec.position, spec.yaw);
+    const collider = createBoxCollider({
+      id: shutter.name,
+      center,
+      size: new THREE.Vector3(0.32, height, width),
+      yaw: spec.yaw,
+      material: 'metal',
+      object: shutter,
+      tags: ['architecture', 'powered-shutter'],
+    });
+    this.colliders.push(collider);
+    this.poweredShutters.push({
+      stage, label, shutter, shutterMaterial, collider, indicatorMaterial, open: false,
+      alertPosition: localToWorld(_local.set(x + side * 1.65, 0, z), spec.position, spec.yaw),
+    });
+  }
+
+  setPowerStage(value) {
+    const stage = Math.min(3, Math.max(0, Math.floor(Number(value) || 0)));
+    if (this.powerStage !== stage) {
+      const staticColliders = this.context?.physics?.staticColliders;
+      for (const gate of this.poweredShutters) {
+        const open = stage >= gate.stage;
+        if (gate.open === open) continue;
+        gate.open = open;
+        gate.collider.routeOpen = open;
+        gate.shutter.visible = !open;
+        gate.indicatorMaterial.color.setHex(open ? 0x9bf3c6 : 0x873323);
+        if (!gate.record || !staticColliders) continue;
+        const index = staticColliders.indexOf(gate.record);
+        if (open && index >= 0) staticColliders.splice(index, 1);
+        if (!open && index < 0) staticColliders.push(gate.record);
+      }
+      for (const { light, stage: threshold, idle, active } of this.powerLights) {
+        light.intensity = stage >= threshold ? active : idle;
+      }
+      this.districtRoute?.setExtractionPowered(stage >= 3);
+      this.powerStage = stage;
+    }
+    const changedGate = this.poweredShutters.find((gate) => gate.stage === stage);
+    if (changedGate) {
+      return { label: changedGate.label, alertPosition: changedGate.alertPosition.clone() };
+    }
+    if (stage === 3 && this.districtRoute) {
+      return {
+        label: 'Cross Street extraction beacon',
+        alertPosition: this.districtRoute.extraction.position.clone(),
+      };
+    }
+    return null;
+  }
+
   dressInteriors(dressingRng) {
     for (const building of this.architecture.buildings) {
       if (!building.spec.enterable) {
@@ -813,7 +905,8 @@ export class WorldBuilder {
       }
 
       if (building.spec.id === 'saffron-arcade') {
-        this.dressSaffronArcade(building, dressingRng);
+        buildSaffronExchange(this, building, dressingRng);
+        continue;
       }
       const isKiln = building.spec.id === 'kiln-house';
       if (isKiln) this.dressKilnHouse(building.spec);
@@ -863,303 +956,6 @@ export class WorldBuilder {
         );
       }
     }
-  }
-
-  dressSaffronArcade(building, rng) {
-    const { spec } = building;
-    const addBox = (material, size, position, options = {}) => {
-      this.architecture.addInstance(
-        spec,
-        material,
-        new THREE.Vector3(...size),
-        new THREE.Vector3(...position),
-        {
-          localEuler: options.rotation
-            ? new THREE.Euler(...options.rotation)
-            : undefined,
-          module: options.module ?? 'storefront',
-          radius: options.radius ?? 0.025,
-        },
-      );
-    };
-    const addCylinder = (material, size, position, options = {}) => {
-      this.architecture.addCylinder(
-        spec,
-        material,
-        new THREE.Vector3(...size),
-        new THREE.Vector3(...position),
-        {
-          localEuler: options.rotation
-            ? new THREE.Euler(...options.rotation)
-            : undefined,
-          module: options.module ?? 'storefront',
-          radialSegments: options.radialSegments ?? 9,
-        },
-      );
-    };
-    const addSoftBundle = (material, size, position, options = {}) => {
-      localToWorld(
-        _local.set(position[0], position[1], position[2]),
-        spec.position,
-        spec.yaw,
-        _position,
-      );
-      _quaternion.setFromEuler(
-        new THREE.Euler(
-          options.rotation?.[0] ?? 0,
-          spec.yaw + (options.rotation?.[1] ?? 0),
-          options.rotation?.[2] ?? 0,
-        ),
-      );
-      this.batcher.softBundle(
-        material,
-        _position,
-        _quaternion,
-        _scale.set(size[0], size[1], size[2]),
-        {
-          name: 'saffron-authored-soft-goods',
-          variant: options.variant ?? 0,
-        },
-      );
-    };
-    const addVessel = (material, size, position, options = {}) => {
-      localToWorld(
-        _local.set(position[0], position[1], position[2]),
-        spec.position,
-        spec.yaw,
-        _position,
-      );
-      _quaternion.setFromEuler(
-        new THREE.Euler(
-          options.rotation?.[0] ?? 0,
-          spec.yaw + (options.rotation?.[1] ?? 0),
-          options.rotation?.[2] ?? 0,
-        ),
-      );
-      this.batcher.vessel(
-        material,
-        _position,
-        _quaternion,
-        _scale.set(size[0], size[1], size[2]),
-        {
-          name: 'saffron-profiled-vessel',
-          variant: options.variant ?? 0,
-        },
-      );
-    };
-
-    // A recognizable service counter: recessed front panels, timber worktop,
-    // register, weighing scale and a low impulse-buy shelf.
-    addBox('paintedMetal', [3.35, 0.78, 0.72], [1.72, 0.43, 3.05]);
-    addBox('wood', [3.58, 0.12, 0.94], [1.72, 0.88, 3.02]);
-    addBox('wood', [3.22, 0.58, 0.075], [1.72, 0.48, 3.43]);
-    for (const x of [0.25, 1.25, 2.25, 3.2]) {
-      addBox('bareMetal', [0.045, 0.58, 0.1], [x, 0.48, 3.48]);
-    }
-    addBox('polymer', [0.48, 0.21, 0.38], [2.72, 1.055, 2.98], {
-      rotation: [-0.08, -0.1, 0],
-    });
-    addBox('glass', [0.38, 0.2, 0.035], [2.72, 1.13, 3.19], {
-      rotation: [-0.12, 0, 0],
-    });
-    addBox('bareMetal', [0.42, 0.08, 0.32], [0.75, 1.01, 3.0]);
-    addCylinder('ceramic', [0.46, 0.08, 0.46], [0.75, 1.08, 3.0], {
-      radialSegments: 14,
-    });
-    addVessel('ceramic', [0.18, 0.31, 0.18], [1.28, 1.13, 3.0], {
-      variant: 1,
-      rotation: [0.02, 0.12, -0.03],
-    });
-    addVessel('plasterBlue', [0.14, 0.25, 0.14], [1.55, 1.08, 3.03], {
-      variant: 2,
-      rotation: [-0.02, -0.16, 0.02],
-    });
-    addSoftBundle('fabric', [0.34, 0.18, 0.27], [2.05, 1.05, 3.02], {
-      variant: 3,
-      rotation: [0, 0.22, Math.PI * 0.5],
-    });
-    addBox('wood', [2.7, 0.09, 0.34], [1.6, 0.18, 3.55]);
-    for (let cubby = 0; cubby < 5; cubby += 1) {
-      addBox(
-        cubby % 2 === 0 ? 'fabric' : 'ceramic',
-        [0.38, 0.22, 0.28],
-        [0.62 + cubby * 0.49, 0.34, 3.57],
-        { rotation: [0, rng.range(-0.08, 0.08), 0], radius: 0.07 },
-      );
-    }
-
-    // Slatted produce bins and individually modelled merchandise create a
-    // readable market silhouette without adding independent draw calls.
-    const producePalette = ['foliage', 'plasterOchre', 'fabric', 'ceramic'];
-    for (let bin = 0; bin < 3; bin += 1) {
-      const binX = -2.15 + bin * 1.15;
-      addBox('wood', [0.98, 0.38, 0.76], [binX, 0.25, 1.55], {
-        rotation: [0.05, (bin - 1) * 0.045, 0],
-        radius: 0.065,
-      });
-      addBox('bareMetal', [0.92, 0.035, 0.62], [binX, 0.48, 1.52], {
-        rotation: [0.08, 0, 0],
-      });
-      for (let item = 0; item < 6; item += 1) {
-        const angle = (item / 6) * Math.PI * 2;
-        addSoftBundle(
-          producePalette[(bin + item) % producePalette.length],
-          [0.18, 0.15 + (item % 2) * 0.04, 0.18],
-          [
-            binX + Math.cos(angle) * 0.25,
-            0.57 + (item % 3) * 0.035,
-            1.52 + Math.sin(angle) * 0.2,
-          ],
-          {
-            rotation: [0, angle * 0.7, 0],
-            variant: bin * 6 + item,
-          },
-        );
-      }
-    }
-
-    // Wall merchandising: deep shelves, bright fabric rolls, hooks, price
-    // boards and construction rails break the otherwise blank side wall.
-    for (const y of [0.78, 1.38, 1.98]) {
-      addBox('wood', [0.62, 0.09, 3.45], [6.75, y, 1.05]);
-    }
-    for (const z of [-0.25, 2.2]) {
-      addBox('bareMetal', [0.08, 2.05, 0.08], [6.63, 1.25, z]);
-    }
-    for (let roll = 0; roll < 7; roll += 1) {
-      addCylinder(
-        roll % 3 === 0 ? 'fabric' : roll % 3 === 1 ? 'plasterBlue' : 'plasterOchre',
-        [0.19, 1.25 + (roll % 2) * 0.22, 0.19],
-        [6.38, 1.0, -0.2 + roll * 0.42],
-        {
-          rotation: [0, 0, (roll - 3) * 0.018],
-          radialSegments: 10,
-        },
-      );
-    }
-    const rackCenter = -6.25;
-    const rackDepth = 3.92;
-    for (const x of [rackCenter - 0.73, rackCenter + 0.73]) {
-      addBox('bareMetal', [0.065, 1.72, 0.48], [x, 0.89, rackDepth], { radius: 0.012 });
-    }
-    addBox('wood', [1.48, 1.69, 0.055], [rackCenter, 0.88, rackDepth - 0.22]);
-    for (let shelf = 0; shelf < 3; shelf += 1) {
-      const shelfTop = 0.42 + shelf * 0.52;
-      addBox('wood', [1.42, 0.07, 0.49], [rackCenter, shelfTop - 0.035, rackDepth]);
-      for (let item = 0; item < 4; item += 1) {
-        const x = rackCenter - 0.48 + item * 0.32;
-        const bottleHeight = 0.22 + (item % 2) * 0.04;
-        if ((shelf + item) % 2 === 0) {
-          addVessel(
-            item % 3 === 0 ? 'ceramic' : 'plasterBlue',
-            [0.14, bottleHeight, 0.14],
-            [x, shelfTop + bottleHeight * 0.5, rackDepth],
-            { variant: shelf + item },
-          );
-        } else {
-          addSoftBundle(
-            item % 3 === 0 ? 'foliage' : 'fabric',
-            [0.18, 0.17, 0.19],
-            [x, shelfTop + 0.073, rackDepth],
-            { variant: shelf * 4 + item },
-          );
-        }
-      }
-    }
-    this.colliders.push(createBoxCollider({
-      id: 'saffron-west-rack',
-      center: new THREE.Vector3(spec.position.x + rackCenter, 0.89, spec.position.z + rackDepth),
-      size: new THREE.Vector3(1.52, 1.72, 0.5),
-      material: 'wood',
-      tags: ['interior', 'prop'],
-    }));
-    addBox('wood', [3.25, 0.7, 0.08], [3.15, 1.82, -1.78], {
-      module: 'fascia-sign',
-    });
-    for (let stripe = 0; stripe < 4; stripe += 1) {
-      addBox(
-        stripe % 2 ? 'ceramic' : 'plasterOchre',
-        [0.58, 0.075, 0.035],
-        [2.25 + stripe * 0.6, 1.82 + (stripe % 2) * 0.12, -1.72],
-        { module: 'fascia-sign' },
-      );
-    }
-    addBox('paintedMetal', [1.42, 0.54, 0.075], [-5.65, 1.62, 0.7], {
-      rotation: [0, Math.PI * 0.5, 0],
-      module: 'blade-sign',
-    });
-    addBox('lamp', [0.78, 0.075, 0.035], [-5.6, 1.62, 0.7], {
-      rotation: [0, Math.PI * 0.5, 0],
-      module: 'blade-sign',
-    });
-
-    // A secondary timber ceiling lattice, utility rail and pendant fixtures
-    // reveal construction depth on both sides of the arcade partition.
-    for (const z of [-6.3, -4.4, -2.5, -0.75, 1.1, 2.95, 4.8, 6.35]) {
-      addBox('wood', [14.7, 0.11, 0.16], [0, 2.91, z], {
-        module: 'roof-screen',
-      });
-    }
-    for (const x of [-6.65, 0, 6.65]) {
-      addBox('bareMetal', [0.12, 0.1, 7.35], [x, 2.85, 2.55], {
-        module: 'roof-screen',
-      });
-    }
-    for (const [x, z] of [[-4.5, -5.9], [2.9, -4.4], [-1.8, 2.2], [2.4, 1.2], [4.85, 4.25]]) {
-      addCylinder('bareMetal', [0.028, 0.62, 0.028], [x, 2.58, z], {
-        radialSegments: 6,
-        module: 'wall-lamp',
-      });
-      addCylinder('lamp', [0.28, 0.16, 0.28], [x, 2.25, z], {
-        radialSegments: 12,
-        module: 'wall-lamp',
-      });
-      addBox('paintedMetal', [0.38, 0.08, 0.38], [x, 2.34, z], {
-        module: 'wall-lamp',
-      });
-    }
-
-    // Exterior service hardware and layered signage give the hero facade
-    // readable construction at the required 3–5 metre review distance.
-    addBox('paintedMetal', [2.75, 0.66, 0.12], [2.15, 2.05, 8.18], {
-      module: 'fascia-sign',
-      radius: 0.055,
-    });
-    addBox('wood', [2.48, 0.46, 0.05], [2.15, 2.05, 8.27], {
-      module: 'fascia-sign',
-      radius: 0.035,
-    });
-    for (let mark = 0; mark < 5; mark += 1) {
-      addBox(
-        mark % 2 ? 'ceramic' : 'plasterOchre',
-        [0.28 + (mark % 2) * 0.16, 0.055, 0.035],
-        [1.28 + mark * 0.42, 2.08 + (mark % 2) * 0.13, 8.32],
-        { module: 'fascia-sign', radius: 0.018 },
-      );
-    }
-    addCylinder('bareMetal', [0.07, 2.65, 0.07], [5.68, 1.48, 8.18], {
-      radialSegments: 12,
-      module: 'drainage',
-    });
-    addCylinder('bareMetal', [0.07, 0.72, 0.07], [5.38, 2.77, 8.18], {
-      rotation: [0, 0, Math.PI * 0.5],
-      radialSegments: 12,
-      module: 'drainage',
-    });
-    addBox('paintedMetal', [0.52, 0.68, 0.18], [5.18, 1.18, 8.22], {
-      module: 'electrical-box',
-      radius: 0.045,
-    });
-    for (let vent = 0; vent < 4; vent += 1) {
-      addBox('bareMetal', [0.34, 0.025, 0.035], [5.18, 1.02 + vent * 0.105, 8.33], {
-        module: 'vent',
-        radius: 0.008,
-      });
-    }
-    addBox('bareMetal', [4.5, 0.035, 0.035], [3.45, 2.78, 8.28], {
-      module: 'cable-run',
-      radius: 0.012,
-    });
   }
 
   placeHeroProps() {
@@ -1349,7 +1145,11 @@ export class WorldBuilder {
       return;
     }
     for (const collider of this.colliders) {
-      this.physicsColliderRecords.push(physics.addStatic(collider));
+      const record = physics.addStatic(collider);
+      this.physicsColliderRecords.push(record);
+      if (collider.tags?.includes('powered-shutter')) {
+        this.poweredShutters.find((gate) => gate.collider === collider).record = record;
+      }
     }
     for (const point of this.coverPoints) {
       this.physicsCoverRecords.push(physics.addCoverPoint(point));
@@ -1362,7 +1162,7 @@ export class WorldBuilder {
     }
     for (let i = this.colliders.length - 1; i >= 0; i -= 1) {
       const collider = this.colliders[i];
-      if (collider.id === 'terrain:base') {
+      if (collider.id === 'terrain:base' || collider.routeOpen) {
         continue;
       }
       if (pointNearCollider(point, collider, 0.18)) {
@@ -1384,8 +1184,7 @@ export class WorldBuilder {
   }
 
   reset() {
-    // The environment is immutable. Match-reset RNG streams affect only dynamic
-    // subsystems; rebuilding static world geometry would create avoidable stalls.
+    this.setPowerStage(0);
     return this.worldData;
   }
 
@@ -1419,6 +1218,10 @@ export class WorldBuilder {
 
     this.root.removeFromParent();
     this.districtRoute?.dispose();
+    for (const gate of this.poweredShutters) {
+      gate.indicatorMaterial.dispose();
+      gate.shutterMaterial.dispose();
+    }
     this.batcher?.dispose();
     this.geometryKit?.dispose();
     if (this.ownsMaterials) {
@@ -1431,6 +1234,9 @@ export class WorldBuilder {
     this.coverPoints.length = 0;
     this.surfaceZones.length = 0;
     this.interiorLights.length = 0;
+    this.poweredShutters.length = 0;
+    this.powerLights.length = 0;
+    this.powerStage = 0;
     this.districtRoute = null;
     this.root = null;
     this.context = null;

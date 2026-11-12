@@ -1,5 +1,7 @@
 import "./style.css";
 import { Game } from "./game/Game.js";
+import { loadDistrictSurfaceImages } from "./materials/DistrictSurfaceTextures.js";
+import { loadExchangeAsset } from "./rendering/ExchangeAsset.js";
 
 const container = document.querySelector("#app");
 const params = new URLSearchParams(window.location.search);
@@ -13,7 +15,12 @@ const options = {
 };
 
 try {
-  const game = new Game(container, options);
+  const [authoredSurfaces, exchangeAsset] = await Promise.all([
+    loadDistrictSurfaceImages(),
+    loadExchangeAsset(),
+  ]);
+  const game = new Game(container, { ...options, authoredSurfaces, exchangeAsset });
+  document.getElementById("boot-loading")?.remove();
   game.start();
   window.__CINDERLINE__ = game;
 } catch (error) {

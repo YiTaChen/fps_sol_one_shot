@@ -406,11 +406,13 @@ export class EnemyDirector {
       this._spawnEnemy(id, spawnStream, false);
     }
 
-    emit(this.events, 'ui:announce', {
-      text: `HOSTILES ACTIVE · ${this.totalCount}`,
-      tone: 'warning',
-      duration: 2.2,
-    });
+    if (config.announce !== false) {
+      emit(this.events, 'ui:announce', {
+        text: `HOSTILES ACTIVE · ${this.totalCount}`,
+        tone: 'warning',
+        duration: 2.2,
+      });
+    }
   }
 
   _spawnEnemy(id, spawnStream, reinforcement) {
@@ -1273,20 +1275,7 @@ export class EnemyDirector {
       const enemy = this.enemies[i];
       if (!enemy.alive) continue;
       if (enemy.rig.root.position.distanceToSquared(tmpPoint) > audibleRadius * audibleRadius) continue;
-      enemy.lastHeard.copy(tmpPoint);
-      enemy.lastHeardTime = this.time;
-      if (!enemy.alerted) {
-        enemy.alerted = true;
-        enemy.reactionDuration = randomRange(
-          enemy.rng,
-          ENEMY_REACTION_MIN,
-          ENEMY_REACTION_MAX,
-        );
-        enemy.reactionTimer = enemy.reactionDuration;
-      }
-      if (enemy.state === EnemyState.IDLE || enemy.state === EnemyState.PATROL) {
-        this._transition(enemy, EnemyState.INVESTIGATE);
-      }
+      this._markHeard(enemy, tmpPoint);
     }
   }
 
@@ -1298,20 +1287,38 @@ export class EnemyDirector {
       if (!enemy.alive) continue;
       const distanceSq = enemy.rig.root.position.distanceToSquared(tmpPoint);
       if (distanceSq > radius * radius) continue;
-      enemy.lastHeard.copy(tmpPoint);
-      enemy.lastHeardTime = this.time;
-      if (!enemy.alerted) {
-        enemy.alerted = true;
-        enemy.reactionDuration = randomRange(
-          enemy.rng,
-          ENEMY_REACTION_MIN,
-          ENEMY_REACTION_MAX,
-        );
-        enemy.reactionTimer = enemy.reactionDuration;
-      }
-      if (enemy.state === EnemyState.IDLE || enemy.state === EnemyState.PATROL) {
-        this._transition(enemy, EnemyState.INVESTIGATE);
-      }
+      this._markHeard(enemy, tmpPoint);
+    }
+  }
+
+  lurePatrols(position) {
+    if (!toVector3(position, tmpPoint)) return 0;
+    const radiusSquared = 34 ** 2;
+    const responders = this.enemies
+      .filter((enemy) => enemy.alive && !enemy.canSeePlayer
+        && (enemy.state === EnemyState.IDLE || enemy.state === EnemyState.PATROL))
+      .map((enemy) => ({ enemy, distance: enemy.rig.root.position.distanceToSquared(tmpPoint) }))
+      .filter(({ distance }) => distance <= radiusSquared)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 2);
+    for (const { enemy } of responders) this._markHeard(enemy, tmpPoint);
+    return responders.length;
+  }
+
+  _markHeard(enemy, position) {
+    enemy.lastHeard.copy(position);
+    enemy.lastHeardTime = this.time;
+    if (!enemy.alerted) {
+      enemy.alerted = true;
+      enemy.reactionDuration = randomRange(
+        enemy.rng,
+        ENEMY_REACTION_MIN,
+        ENEMY_REACTION_MAX,
+      );
+      enemy.reactionTimer = enemy.reactionDuration;
+    }
+    if (enemy.state === EnemyState.IDLE || enemy.state === EnemyState.PATROL) {
+      this._transition(enemy, EnemyState.INVESTIGATE);
     }
   }
 

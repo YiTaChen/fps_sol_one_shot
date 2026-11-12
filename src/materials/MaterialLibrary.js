@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createDistrictTextureSet, DISTRICT_SURFACE_FAMILIES } from './DistrictSurfaceTextures.js';
 import {
   createProceduralTextureSet,
   seedFromRng,
@@ -430,10 +431,10 @@ function resolveStream(service, name) {
 
 const WORLD_PROJECTED_STYLES = new Set(['concrete', 'aggregate', 'brick', 'plaster', 'asphalt', 'earth', 'sand']);
 
-function applyWorldWeathering(material, recipe) {
+function applyWorldWeathering(material, metersPerTile) {
   material.customProgramCacheKey = () => 'cinderline-world-weathering';
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.materialTileMeters = { value: recipe.metersPerTile };
+    shader.uniforms.materialTileMeters = { value: metersPerTile };
     shader.vertexShader = shader.vertexShader.replace('#include <common>', `
       #include <common>
       uniform float materialTileMeters;
@@ -478,7 +479,7 @@ function applyWorldWeathering(material, recipe) {
 }
 
 /**
- * Shared procedural PBR material registry. One instance is intended per Game.
+ * Shared PBR material registry. One instance is intended per Game.
  */
 export class MaterialLibrary {
   constructor(options = {}) {
@@ -487,6 +488,7 @@ export class MaterialLibrary {
       renderer = null,
       textureSize = 256,
       quality = 'medium',
+      authoredSurfaces = null,
     } = options;
     this.rng = resolveStream(rng, 'materials');
     this.renderer = renderer;
@@ -503,7 +505,7 @@ export class MaterialLibrary {
     this.materials = new Map();
     this.textureSets = new Map();
     this.disposed = false;
-    this._createFamilies();
+    this._createFamilies(authoredSurfaces);
   }
 
   static fromContext(context, options = {}) {
@@ -515,23 +517,35 @@ export class MaterialLibrary {
     });
   }
 
-  _createFamilies() {
+  _createFamilies(authoredSurfaces) {
     const anisotropy = Math.min(
       8,
       this.renderer?.capabilities?.getMaxAnisotropy?.() ?? 4,
     );
 
+    const sharedDistrictTextures = new Map();
     for (const recipe of Object.values(MATERIAL_FAMILIES)) {
       const familySeed =
         seedFromRng(this.rng, recipe.id) ^ seedFromString(`cinderline:${recipe.id}`);
-      const textures = createProceduralTextureSet(recipe, familySeed >>> 0, this.textureSize);
+      const source = DISTRICT_SURFACE_FAMILIES[recipe.id];
+      const images = authoredSurfaces?.get(source?.image);
+      let textures;
+      if (images) {
+        textures = sharedDistrictTextures.get(source.image);
+        if (!textures) {
+          textures = createDistrictTextureSet(source.image, images);
+          sharedDistrictTextures.set(source.image, textures);
+        }
+      } else {
+        textures = createProceduralTextureSet(recipe, familySeed >>> 0, this.textureSize);
+      }
       textures.colorMap.anisotropy = anisotropy;
       textures.normalMap.anisotropy = anisotropy;
       textures.roughnessMap.anisotropy = anisotropy;
 
       const materialOptions = {
         name: `pbr:${recipe.id}`,
-        color: 0xffffff,
+        color: images ? source.tint : 0xffffff,
         map: textures.colorMap,
         normalMap: textures.normalMap,
         roughnessMap: textures.roughnessMap,
@@ -549,12 +563,15 @@ export class MaterialLibrary {
         emissiveIntensity: recipe.emissiveIntensity ?? 0,
       };
       const material = new THREE.MeshStandardMaterial(materialOptions);
-      material.normalScale.setScalar(recipe.normalScale ?? 0.72);
-      if (WORLD_PROJECTED_STYLES.has(recipe.style)) applyWorldWeathering(material, recipe);
+      const metersPerTile = images ? source.tile : recipe.metersPerTile;
+      material.normalScale.setScalar(images ? source.normal : recipe.normalScale ?? 0.72);
+      if (images || WORLD_PROJECTED_STYLES.has(recipe.style)) {
+        applyWorldWeathering(material, metersPerTile);
+      }
       material.userData.family = recipe.id;
       material.userData.surface = recipe.surface;
-      material.userData.metersPerTile = recipe.metersPerTile;
-      material.userData.procedural = true;
+      material.userData.metersPerTile = metersPerTile;
+      material.userData.procedural = !images;
       material.userData.metadata = this.surfaceFor(recipe.surface);
 
       this.materials.set(recipe.id, material);
@@ -592,7 +609,7 @@ export class MaterialLibrary {
     for (const material of this.materials.values()) {
       material.dispose();
     }
-    for (const textures of this.textureSets.values()) {
+    for (const textures of new Set(this.textureSets.values())) {
       textures.colorMap.dispose();
       textures.normalMap.dispose();
       textures.roughnessMap.dispose();

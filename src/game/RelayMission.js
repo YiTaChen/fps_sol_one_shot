@@ -10,6 +10,7 @@ export const RELAY_PATROLS = Object.freeze([
 
 const HOLD_SECONDS = 1.1;
 const DAMAGE_RECOVERY_SECONDS = 0.65;
+const DECOY_DELAY_SECONDS = 1.5;
 
 export class RelayMission {
   constructor(route, extraction) {
@@ -23,6 +24,7 @@ export class RelayMission {
       progress: 0,
       interrupted: false,
       extracted: false,
+      decoy: null,
     };
     this.reset();
   }
@@ -30,12 +32,15 @@ export class RelayMission {
   reset() {
     this.clearHold();
     this.cooldown = 0;
+    this.decoySource = null;
+    this.pendingDecoy = null;
     Object.assign(this.state, {
       completed: 0,
       target: this.checkpoints[0],
       nearby: false,
       interrupted: false,
       extracted: false,
+      decoy: null,
     });
   }
 
@@ -47,6 +52,29 @@ export class RelayMission {
   interrupt() {
     this.clearHold();
     this.cooldown = DAMAGE_RECOVERY_SECONDS;
+  }
+
+  chargeDecoy(label, position) {
+    this.decoySource = { position, stage: this.state.completed };
+    this.state.decoy = { label, ready: true, remaining: 0 };
+  }
+
+  updateDecoy(dt, triggered) {
+    if (this.pendingDecoy) {
+      const signal = this.pendingDecoy;
+      signal.status.remaining = Math.max(0, signal.status.remaining - dt);
+      if (signal.status.remaining > 0) return null;
+      this.pendingDecoy = null;
+      return signal;
+    }
+
+    const { decoy } = this.state;
+    if (triggered && decoy?.ready) {
+      decoy.ready = false;
+      decoy.remaining = DECOY_DELAY_SECONDS;
+      this.pendingDecoy = { ...this.decoySource, status: decoy };
+    }
+    return null;
   }
 
   update(dt, position, held) {

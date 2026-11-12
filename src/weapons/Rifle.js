@@ -9,14 +9,14 @@ const MUZZLE = new THREE.Vector3();
 const TRACER_END = new THREE.Vector3();
 const LOCAL_TARGET = new THREE.Vector3();
 const POSE_POSITION = new THREE.Vector3();
-const HIP_POSITION = new THREE.Vector3(0.225, -0.248, -0.71);
+const HIP_POSITION = new THREE.Vector3(0.242, -0.24, -0.79);
 const ADS_POSITION = new THREE.Vector3(0, -0.18, -0.6);
 const SPRINT_POSITION = new THREE.Vector3(0.38, -0.39, -0.24);
 const LEFT_HAND_HOME = new THREE.Vector3(-0.025, -0.006, -0.34);
 const POSE_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
 const POSE_QUATERNION = new THREE.Quaternion();
 const HIP_QUATERNION = new THREE.Quaternion().setFromEuler(
-  new THREE.Euler(0.055, -0.105, -0.042, 'YXZ'),
+  new THREE.Euler(0.038, -0.142, -0.032, 'YXZ'),
 );
 const ADS_QUATERNION = new THREE.Quaternion();
 const SPRINT_QUATERNION = new THREE.Quaternion().setFromEuler(
@@ -1136,6 +1136,18 @@ export class Rifle {
     ], 0.072, 0.008), polymer);
     cheekStock.name = 'profiled-cheek-stock';
     this.weapon.add(cheekStock);
+    const cheekGrip = roundedPart(
+      this.weapon,
+      new THREE.Vector3(0.067, 0.012, 0.145),
+      new THREE.Vector3(0, 0.077, 0.268),
+      rubber, 0.004, 2, 'textured-cheek-insert',
+    );
+    cheekGrip.rotation.x = 0.047;
+    for (let row = 0; row < 7; row += 1) {
+      roundedPart(this.weapon, new THREE.Vector3(0.057, 0.0035, 0.006),
+        new THREE.Vector3(0, 0.083 + row * 0.0007, 0.205 + row * 0.017),
+        darkMetal, 0.0015, 1, 'cheek-insert-rib');
+    }
     for (const side of [-1, 1]) {
       const strut = new THREE.Mesh(sideProfileGeometry([
         [0.165, -0.017],

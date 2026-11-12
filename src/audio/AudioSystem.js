@@ -338,6 +338,7 @@ export class AudioSystem {
     if (normalized.includes('footstep')) return this._playFootstep(normalized, options);
     if (normalized === 'player-jump') return this._playJump(options);
     if (normalized === 'player-land') return this._playLand(options);
+    if (normalized === 'relay-pulse') return this._playRelayPulse(options);
     if (normalized === 'slide' || normalized === 'mantle') {
       return this._playMovement(normalized, options);
     }
@@ -782,6 +783,23 @@ export class AudioSystem {
       bus: 'ui',
       options: {},
     });
+    return true;
+  }
+
+  _playRelayPulse(options) {
+    const volume = clamp(options.volume ?? 0.8, 0, 1.5);
+    for (const [frequency, delay] of [[218, 0], [326, 0.15], [490, 0.30]]) {
+      this._tone({
+        frequency,
+        endFrequency: frequency * 0.73,
+        type: 'triangle',
+        duration: 0.18,
+        volume: volume * 0.36,
+        delay,
+        reverb: 0.2,
+        options,
+      });
+    }
     return true;
   }
 

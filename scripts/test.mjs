@@ -500,6 +500,7 @@ async function main() {
 
     const relay = await runRelayAndInputContract(page);
     pass('relay route and extraction', '3 relays, early exit, damage, pause, replay');
+    pass('staged power and signal decoy', '3 power stages, one pulse, pause and replay');
     pass('short click and same-step aim', `yaw difference ${relay.yawError.toFixed(4)} rad`);
 
     const internalDiagnostics = await page.evaluate(

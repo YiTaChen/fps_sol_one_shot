@@ -1,6 +1,6 @@
 {
   "status": "passed",
-  "durationMs": 6953.129482,
+  "durationMs": 7192.412006,
   "results": [
     {
       "name": "physics step contract",
@@ -118,6 +118,11 @@
       "detail": "3 relays, early exit, damage, pause, replay"
     },
     {
+      "name": "staged power and signal decoy",
+      "status": "passed",
+      "detail": "3 power stages, one pulse, pause and replay"
+    },
+    {
       "name": "short click and same-step aim",
       "status": "passed",
       "detail": "yaw difference 0.0072 rad"
@@ -135,11 +140,11 @@
     "httpErrors": []
   },
   "gameDiagnostics": {
-    "frameCount": 59,
+    "frameCount": 62,
     "medianFrameMs": 50.00000074505806,
     "p95FrameMs": 250,
     "medianFps": 19.99999970197678,
-    "elapsedMs": 5667.399999999907,
+    "elapsedMs": 5780.200000000186,
     "counters": {
       "listeners": 65,
       "enemies": 7,
@@ -148,26 +153,26 @@
     "errors": [],
     "renderer": {
       "memory": {
-        "geometries": 365,
-        "textures": 90
+        "geometries": 394,
+        "textures": 82
       },
       "render": {
-        "frame": 2174,
-        "calls": 93,
-        "triangles": 12808,
+        "frame": 2270,
+        "calls": 112,
+        "triangles": 15544,
         "points": 0,
         "lines": 0
       }
     },
     "rendererInfo": {
       "memory": {
-        "geometries": 365,
-        "textures": 90
+        "geometries": 394,
+        "textures": 82
       },
       "render": {
-        "frame": 2174,
-        "calls": 93,
-        "triangles": 12808,
+        "frame": 2270,
+        "calls": 112,
+        "triangles": 15544,
         "points": 0,
         "lines": 0
       }

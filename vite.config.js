@@ -16,6 +16,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (id.endsWith("/three/examples/jsm/loaders/GLTFLoader.js")) return "gltf-loader";
           if (id.includes("/node_modules/three/")) return "three";
           return undefined;
         },

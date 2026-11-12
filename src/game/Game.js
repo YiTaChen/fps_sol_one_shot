@@ -31,6 +31,8 @@ import {
 const FIXED_STEP = 1 / 60;
 const BASE_ENEMY_COUNT = 7;
 const ACTIVE_ENEMY_LIMIT = 12;
+const MENU_CAMERA_POSITION = new THREE.Vector3(-45.6, 2.35, 5.4);
+const MENU_CAMERA_TARGET = new THREE.Vector3(-42.5, 3.5, -6);
 const _damageDirection = new THREE.Vector3(0, 0, 1);
 const _capturePosition = new THREE.Vector3();
 const _captureTarget = new THREE.Vector3();
@@ -133,6 +135,7 @@ export class Game {
       container,
       options.quality || "high",
     );
+    if (options.exchangeAsset) this.rendering.installExchange(options.exchangeAsset);
     this.state = {
       phase: "menu",
       mode: "sweep",
@@ -160,7 +163,7 @@ export class Game {
       input: null,
       quality: this.rendering.quality,
       physics: this.physics,
-      assets: {},
+      assets: { exchangeAsset: options.exchangeAsset },
       state: this.state,
       diagnostics: this.diagnostics,
     };
@@ -179,6 +182,7 @@ export class Game {
 
     this.materials = MaterialLibrary.fromContext(this.context, {
       textureSize: this.rendering.quality.name === "low" ? 128 : 256,
+      authoredSurfaces: options.authoredSurfaces,
     });
     this.context.assets.materials = this.materials;
     this.context.assets.materialLibrary = this.materials;
@@ -253,6 +257,7 @@ export class Game {
     this.ready = true;
     this.exposeTestInterface();
     if (this.captureMode) this.setCapturePose(this.captureMode);
+    else this.applyMenuCamera();
   }
 
   installLifecycle() {
@@ -304,9 +309,8 @@ export class Game {
     }
     this.state.mode = mode === "relay" && this.relayMission ? "relay" : "sweep";
     this.state.mission = this.state.mode === "relay" ? this.relayMission.state : null;
-    if (this.world.spawn) {
-      this.player.setSpawn(this.world.spawn.position, this.state.mode === "relay" ? -0.12 : this.world.spawn.yaw);
-    }
+    const spawn = this.state.mode === "relay" ? this.world.relaySpawn : this.world.spawn;
+    this.player.setSpawn(spawn.position, spawn.yaw);
     this._resetRound();
     this.audio.resume();
   }
@@ -315,7 +319,9 @@ export class Game {
     this.state.phase = "menu";
     this.state.mode = "sweep";
     this.state.mission = null;
-    this.world.setRouteStatus?.(null, []);
+    this.relayMission?.reset();
+    this.setDistrictPowerStage(0);
+    this.syncRelaySignals();
     this.state.level = 1;
     this.state.seed = this.baseSeed;
     if (this.world.spawn) this.player.setSpawn(this.world.spawn.position, this.world.spawn.yaw);
@@ -396,6 +402,7 @@ export class Game {
     this.state.elapsed = 0;
     this.state.requiredKills = this._enemyCountForLevel();
     this.relayMission?.reset();
+    this.setDistrictPowerStage(0);
     this.syncRelaySignals();
     this.rng.reset(this.state.seed);
     this.input.reset();
@@ -408,6 +415,7 @@ export class Game {
       playerSpawn: this.player.spawnPosition,
       safeRadius: ENEMY_INITIAL_SAFE_RADIUS,
       placements: this.state.mode === "relay" ? RELAY_PATROLS : null,
+      announce: this.state.mode === "sweep",
     });
     this.player.setEnabled(true);
     this.rifle.setEnabled(true);
@@ -487,7 +495,28 @@ export class Game {
     this.world.setRouteStatus?.(mission?.target?.id ?? null, completed);
   }
 
+  setDistrictPowerStage(stage) {
+    this.rendering.setExchangePowerStage?.(stage);
+    return this.world.setPowerStage?.(stage);
+  }
+
   updateRelayMission(dt) {
+    const decoy = this.relayMission.updateDecoy(dt, this.input.consumePressed("KeyG"));
+    if (decoy) {
+      const { position, stage } = decoy;
+      const responders = this.enemies.lurePatrols(position);
+      if (!this.state.controls.reducedMotion) this.rendering.pulseExchange?.(position);
+      this.events.emit("relay:decoy", { position, stage, responders });
+      this.events.emit("audio:play", { name: "relay-pulse", position, volume: 0.8 });
+      this.events.emit("ui:announce", {
+        text: responders > 0
+          ? `${responders} ${responders === 1 ? "patrol diverted" : "patrols diverted"}`
+          : "Decoy fired · no patrol diverted",
+        tone: "neutral",
+        duration: 2.1,
+      });
+    }
+
     const previousTarget = this.relayMission.state.target;
     const result = this.relayMission.update(dt, this.player.position, this.input.isDown("KeyF"));
     if (!result) return;
@@ -497,10 +526,14 @@ export class Game {
       this.finishMatch("victory");
       return;
     }
-    this.enemies.forceAlert(previousTarget.position, 24);
     const { completed, total } = this.relayMission.state;
+    const power = this.setDistrictPowerStage(completed);
+    const label = power?.label ?? previousTarget.label;
+    const position = power?.alertPosition ?? previousTarget.position;
+    this.relayMission.chargeDecoy(label, position);
+    this.events.emit("relay:power", { position, stage: completed });
     this.events.emit("ui:announce", {
-      text: completed === total ? "All relays online · proceed to extraction" : `Relay ${completed} online`,
+      text: completed === total ? "Grid restored · proceed to extraction" : `${label} powered`,
       tone: "success",
       duration: 2.3,
     });
@@ -519,8 +552,9 @@ export class Game {
     }
     this.enemies.update(dt, alpha);
     this.effects.update(dt, alpha);
-    this.audio.setListener(this.rendering.camera);
     if (this.captureOverride) this.applyCaptureCamera();
+    else if (this.state.phase === "menu") this.applyMenuCamera();
+    this.audio.setListener(this.rendering.camera);
     this.ui.render({
       dt,
       player: this.player.snapshot,
@@ -813,6 +847,12 @@ export class Game {
     this.rendering.camera.updateProjectionMatrix();
     this.rendering.camera.lookAt(this.captureOverride.target);
     _captureQuaternion.copy(this.rendering.camera.quaternion);
+  }
+
+  applyMenuCamera() {
+    const camera = this.rendering.camera;
+    camera.position.copy(MENU_CAMERA_POSITION);
+    camera.lookAt(MENU_CAMERA_TARGET);
   }
 
   stateSnapshot() {

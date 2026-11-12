@@ -11,50 +11,50 @@
       "id": "wide-street",
       "file": "01-wide-street.png",
       "description": "Wide market street composition",
-      "bytes": 1230254,
-      "sha256": "603bd709c4ce38b18eaee599cb294ba0a854f78d142938d4154e31819e831c58"
+      "bytes": 1469785,
+      "sha256": "2278e23619d4754459eebde4345d45e3c2cc3ced090823169fce06940ef885a6"
     },
     {
       "id": "facade-close",
       "file": "02-facade-close.png",
       "description": "Close procedural façade",
-      "bytes": 1181525,
-      "sha256": "380beacf1ced38e09b0e400c61c0fd624c8dedc98beaa8df260bb6d25ee61a17"
+      "bytes": 1114322,
+      "sha256": "9b17034982bd523577001bd0a11b174666af0e1f8b18ca1952228f94fd8e69aa"
     },
     {
       "id": "interior",
       "file": "03-interior.png",
       "description": "Enterable dressed interior",
-      "bytes": 1549619,
-      "sha256": "f6ac8db53212042fa6ffafc8790a41d06f4b43f5632ad5915118f4d9f47a0c01"
+      "bytes": 1432639,
+      "sha256": "664a11377b24713bc713f7b1fb2822dad47126eb2e7d40c8a9067e0beeecd97e"
     },
     {
       "id": "weapon-hip",
       "file": "04-weapon-hip.png",
       "description": "Hip-fire weapon close-up",
-      "bytes": 1514714,
-      "sha256": "18fe4d5c6fd9334fe97a3894057558786803bd5cc2e60ddefd1aab3f498587b5"
+      "bytes": 1432590,
+      "sha256": "2592ffe1f269f86ffc6a9c760483002a9e25460bb3f9c5a03743271ff21f54b4"
     },
     {
       "id": "weapon-ads",
       "file": "05-weapon-ads.png",
       "description": "ADS weapon alignment",
-      "bytes": 1528084,
-      "sha256": "b2714d2e8ab9559027610d6c01f5ca3f6f767a29c345ea5cb8bb03921f1414b8"
+      "bytes": 1430860,
+      "sha256": "505990033ebdf8eaf1f46a99f03bd2473ad1343363a5bb7741eefdd766db0624"
     },
     {
       "id": "enemy",
       "file": "06-enemy.png",
       "description": "Enemy soldier at combat distance",
-      "bytes": 1153305,
-      "sha256": "09a6ccdf70a1813c2a332ec21ddd48ada50caa3d2bf2b2a32d81ecc2ddcb376e"
+      "bytes": 1152820,
+      "sha256": "d098903bff250599e7b877b663451b8defb93dada7f24cab0b366141e8316808"
     },
     {
       "id": "active-combat",
       "file": "07-active-combat.png",
       "description": "Active combat, effects, enemy, world, and HUD",
-      "bytes": 1287644,
-      "sha256": "234f061c8190d939d2585a3c6cba33a405958b838228fd6ae618a2db934ed9cd",
+      "bytes": 1401513,
+      "sha256": "c3aaafdf0d31880d5e8c8e60fbdbeb3e519ee9f67217002ae8e6713bf89e6878",
       "state": {
         "targetId": 0,
         "targetHealthBefore": 100,
@@ -81,5 +81,5 @@
     "httpErrors": []
   },
   "mode": "full",
-  "completedAt": "2026-11-12T05:22:55.473Z"
+  "completedAt": "2026-11-12T05:53:28.418Z"
 }

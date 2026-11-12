@@ -60,10 +60,60 @@ export class RendererSystem {
     this.worldRoot = new THREE.Group();
     this.worldRoot.name = "WorldRoot";
     this.scene.add(this.worldRoot);
+    this.exchangeRotor = null;
+    this.exchangeLamps = null;
+    this.condenserStatus = null;
+    this.exchangeStage = 0;
+    this.pulseStart = -Infinity;
+    this.exchangePulse = new THREE.Mesh(
+      new THREE.RingGeometry(0.91, 1, 44),
+      new THREE.MeshBasicMaterial({
+        color: 0x91f5ff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        toneMapped: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    this.exchangePulse.name = 'Relay signal pulse';
+    this.exchangePulse.rotation.x = -Math.PI / 2;
+    this.exchangePulse.visible = false;
+    this.scene.add(this.exchangePulse);
     this.installAtmosphere();
     this.installPostProcessing();
     this.applyQuality(qualityName);
     this.resize();
+  }
+
+  installExchange(scene) {
+    if (!scene) return;
+    this.exchangeRotor = scene.getObjectByName('exchange_rotor');
+    scene.traverse((object) => {
+      if (!object.isMesh) return;
+      object.receiveShadow = true;
+      if (object.material.name === 'Amber service lamps') this.exchangeLamps = object.material;
+      if (object.material.name === 'Freight condenser status') this.condenserStatus = object.material;
+    });
+    this.worldRoot.add(scene);
+    this.setExchangePowerStage(0);
+  }
+
+  setExchangePowerStage(stage) {
+    this.exchangeStage = stage;
+    if (this.exchangeLamps) this.exchangeLamps.emissiveIntensity = stage > 0 ? 4 : 1.8;
+    if (this.condenserStatus) this.condenserStatus.emissiveIntensity = stage >= 2 ? 3.6 : 0.6;
+    if (stage === 0) {
+      this.pulseStart = -Infinity;
+      this.exchangePulse.visible = false;
+      if (this.exchangeRotor) this.exchangeRotor.rotation.z = 0;
+    }
+  }
+
+  pulseExchange(position) {
+    this.exchangePulse.position.set(position.x, position.y + 0.065, position.z);
+    this.pulseStart = performance.now();
+    this.exchangePulse.visible = true;
   }
 
   installAtmosphere() {
@@ -209,6 +259,9 @@ export class RendererSystem {
       Math.min(window.devicePixelRatio || 1, this.quality.dpr),
     );
     this.renderer.shadowMap.enabled = this.quality.shadows;
+    this.renderer.shadowMap.autoUpdate = this.quality.name === "high";
+    this.renderer.shadowMap.needsUpdate = true;
+    this.shadowFrame = 0;
     this.ssaoPass.enabled = this.quality.name === "high";
     this.bloomPass.enabled = this.quality.name !== "low";
     this.bloomPass.strength = this.quality.name === "high" ? 0.165 : 0.11;
@@ -244,7 +297,23 @@ export class RendererSystem {
 
   render(deltaSeconds = 0) {
     this.sky.position.copy(this.camera.position);
-    if (!this.motionPreference.matches) this.ash.material.uniforms.clock.value += deltaSeconds;
+    if (!this.motionPreference.matches) {
+      this.ash.material.uniforms.clock.value += deltaSeconds;
+      if (this.exchangeRotor && this.exchangeStage > 0) {
+        this.exchangeRotor.rotation.z -= deltaSeconds * 2.7;
+      }
+    }
+    if (this.exchangePulse.visible) {
+      const progress = (performance.now() - this.pulseStart) / 650;
+      this.exchangePulse.visible = progress < 1;
+      this.exchangePulse.material.opacity = Math.max(0, (1 - progress) * 0.5);
+      this.exchangePulse.scale.setScalar(deltaSeconds > 0 ? 0.65 + progress * 4.1 : 1.8);
+    }
+    // The sun is static. On the two lighter presets reuse its map for one
+    // frame while camera, characters and combat keep their full render rate.
+    if (!this.renderer.shadowMap.autoUpdate && this.shadowFrame++ % 2 === 0) {
+      this.renderer.shadowMap.needsUpdate = true;
+    }
     this.renderer.setRenderTarget(null);
     this.composer.render();
     this.renderer.clearDepth();
