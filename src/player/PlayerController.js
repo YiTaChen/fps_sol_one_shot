@@ -31,9 +31,9 @@ const DEFAULTS = Object.freeze({
   walkSpeed: 4.25,
   sprintSpeed: 7.15,
   crouchSpeed: 2.35,
-  groundAcceleration: 31,
+  groundAcceleration: 39,
   airAcceleration: 8.5,
-  groundDeceleration: 24,
+  groundDeceleration: 31,
   jumpSpeed: 5.45,
   gravity: 18.5,
   maxFallSpeed: 32,
@@ -202,6 +202,9 @@ export class PlayerController {
       context = null;
     }
     this.options = { ...DEFAULTS, ...options };
+    this.sensitivity = 1;
+    this.adsSensitivity = 0.65;
+    this.motionScale = 1;
     this.context = null;
     this.events = null;
     this.physics = null;
@@ -250,7 +253,6 @@ export class PlayerController {
     this._landImpulse = 0;
     this._cameraRoll = 0;
     this._lookInertiaX = 0;
-    this._lookInertiaY = 0;
     this._recoilPitch = 0;
     this._recoilYaw = 0;
     this._damageKick = 0;
@@ -348,7 +350,6 @@ export class PlayerController {
     this._landImpulse = 0;
     this._cameraRoll = 0;
     this._lookInertiaX = 0;
-    this._lookInertiaY = 0;
     this._recoilPitch = 0;
     this._recoilYaw = 0;
     this._damageKick = 0;
@@ -447,7 +448,7 @@ export class PlayerController {
       return;
     }
 
-    this._updateLook();
+    this.sampleLook();
     if (this.mantling) this._fixedMantle(dt);
     else this._fixedMovement(dt);
 
@@ -469,23 +470,31 @@ export class PlayerController {
     this._syncSnapshot();
   }
 
-  _updateLook() {
+  applyControls(settings) {
+    this.sensitivity = settings.sensitivity / 100;
+    this.adsSensitivity = settings.adsSensitivity / 100;
+    this.motionScale = settings.reducedMotion ? 0 : 1;
+  }
+
+  syncAimCamera() {
+    this._applyCameraPose(0, 1);
+  }
+
+  sampleLook() {
+    if (!this.enabled || !this.alive) return;
     readLook(this.input, this._lookDelta);
     if (!this._lookDelta.x && !this._lookDelta.y) return;
-    this.yaw -= this._lookDelta.x * this.options.lookSensitivity;
-    this.pitch -= this._lookDelta.y * this.options.lookSensitivity;
+    const aiming = this.input?.buttonDown?.(2) && !this.context?.state?.weapon?.reloading;
+    const sensitivity = this.options.lookSensitivity * this.sensitivity
+      * (aiming ? this.adsSensitivity : 1);
+    this.yaw -= this._lookDelta.x * sensitivity;
+    this.pitch -= this._lookDelta.y * sensitivity;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -Math.PI * 0.475, Math.PI * 0.475);
-    if (this.yaw > Math.PI) this.yaw -= Math.PI * 2;
-    else if (this.yaw < -Math.PI) this.yaw += Math.PI * 2;
+    this.yaw = THREE.MathUtils.euclideanModulo(this.yaw + Math.PI, Math.PI * 2) - Math.PI;
     this._lookInertiaX = THREE.MathUtils.clamp(
       this._lookInertiaX - this._lookDelta.x * 0.00022,
       -0.018,
       0.018,
-    );
-    this._lookInertiaY = THREE.MathUtils.clamp(
-      this._lookInertiaY - this._lookDelta.y * 0.00018,
-      -0.014,
-      0.014,
     );
   }
 
@@ -904,10 +913,12 @@ export class PlayerController {
     const bobRate = this.sprinting ? 12.2 : this.crouched ? 6.4 : 8.7;
     this._bobPhase += dt * bobRate * Math.max(0.2, movementWeight);
 
-    const bobY = Math.sin(this._bobPhase * 2) * 0.018 * this._bobWeight;
-    const bobX = Math.sin(this._bobPhase) * 0.012 * this._bobWeight;
-    const landingY = -this._landImpulse * 0.095;
-    const damageRoll = Math.sin(this._time * 35) * this._damageKick * 0.014;
+    const adsWeight = this.context?.state?.weapon?.ads ?? 0;
+    const sway = this.motionScale * (1 - 0.72 * adsWeight);
+    const bobY = Math.sin(this._bobPhase * 2) * 0.018 * this._bobWeight * sway;
+    const bobX = Math.sin(this._bobPhase) * 0.012 * this._bobWeight * sway;
+    const landingY = -this._landImpulse * 0.065 * this.motionScale;
+    const damageRoll = Math.sin(this._time * 35) * this._damageKick * 0.014 * this.motionScale;
 
     RIGHT.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     LEAN_OFFSET.copy(RIGHT).multiplyScalar(this.lean);
@@ -918,7 +929,6 @@ export class PlayerController {
     this.camera.position.copy(CAMERA_POSITION);
 
     this._lookInertiaX = damp(this._lookInertiaX, 0, 15, dt);
-    this._lookInertiaY = damp(this._lookInertiaY, 0, 15, dt);
     const leanRatio = this.options.leanDistance > 0 ? this.lean / this.options.leanDistance : 0;
     this._cameraRoll = damp(
       this._cameraRoll,
@@ -927,9 +937,9 @@ export class PlayerController {
       dt,
     );
     EULER.set(
-      this.pitch - this._recoilPitch + this._lookInertiaY,
+      this.pitch - this._recoilPitch,
       this.yaw - this._recoilYaw,
-      this._cameraRoll + this._lookInertiaX,
+      this._cameraRoll + this._lookInertiaX * sway,
     );
     this.camera.quaternion.setFromEuler(EULER);
     this.camera.updateMatrixWorld();

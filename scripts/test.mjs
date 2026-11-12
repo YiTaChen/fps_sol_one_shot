@@ -15,6 +15,8 @@ import { assertRestartSnapshot } from '../tests/restart-contract.mjs';
 import { runEnemyAiContract } from '../tests/enemy-ai-contract.mjs';
 import { runPhysicsStepContract } from '../tests/physics-step-contract.mjs';
 import { runProgressionContract } from '../tests/progression-contract.mjs';
+import { runRelayAndInputContract } from '../tests/relay-and-input-contract.mjs';
+import { runDistrictRouteContract } from '../tests/district-route-contract.mjs';
 
 const results = [];
 const startedAt = performance.now();
@@ -27,6 +29,8 @@ function pass(name, detail = '') {
 async function main() {
   const physicsContract = runPhysicsStepContract();
   pass('physics step contract', `${physicsContract.checks} collision cases`);
+  const districtRoute = runDistrictRouteContract();
+  pass('district route contract', `${districtRoute.locations} reachable objective locations across ${districtRoute.seeds} seeds`);
   const enemyAiContract = runEnemyAiContract();
   pass(
     'enemy AI contract',
@@ -493,6 +497,10 @@ async function main() {
       `Pointer-lock loss did not pause/reset input (${JSON.stringify(pointerLock)})`,
     );
     pass('pointer-lock loss and input reset');
+
+    const relay = await runRelayAndInputContract(page);
+    pass('relay route and extraction', '3 relays, early exit, damage, pause, replay');
+    pass('short click and same-step aim', `yaw difference ${relay.yawError.toFixed(4)} rad`);
 
     const internalDiagnostics = await page.evaluate(
       () => window.__FPS_TEST__.diagnostics(),

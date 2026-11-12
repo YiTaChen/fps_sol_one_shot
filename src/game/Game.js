@@ -20,6 +20,8 @@ import { RendererSystem } from "../rendering/RendererSystem.js";
 import { UI } from "../ui/UI.js";
 import { Rifle } from "../weapons/Rifle.js";
 import { WorldBuilder } from "../world/WorldBuilder.js";
+import { normalizeControls, readControls, saveControls } from "./ControlSettings.js";
+import { RELAY_PATROLS, RelayMission } from "./RelayMission.js";
 import {
   deriveLevelSeed,
   readHighestClearedLevel,
@@ -133,6 +135,9 @@ export class Game {
     );
     this.state = {
       phase: "menu",
+      mode: "sweep",
+      mission: null,
+      controls: readControls(),
       level: 1,
       baseEnemyCount: BASE_ENEMY_COUNT,
       highestClearedLevel: readHighestClearedLevel(),
@@ -184,6 +189,10 @@ export class Game {
     });
     this.world = this.worldBuilder.build(this.context);
     this.context.assets.world = this.world;
+    this.relayMission = this.world.route?.length && this.world.extraction
+      ? new RelayMission(this.world.route, this.world.extraction)
+      : null;
+    this.world.setRouteStatus?.(null, []);
     if (this.world?.root && !this.world.root.parent) {
       this.rendering.worldRoot.add(this.world.root);
     }
@@ -195,6 +204,7 @@ export class Game {
     this.context.input = this.input;
 
     this.player = new PlayerController(this.context);
+    this.player.applyControls(this.state.controls);
     const spawn = this.world?.spawn?.position
       ?? this.world?.spawn
       ?? this.world?.playerSpawn?.position
@@ -264,7 +274,9 @@ export class Game {
     }, { signal });
 
     this.unsubscribers.push(
-      this.events.on("game:start", () => this.activateMatch()),
+      this.events.on("game:start", (event) => this.activateMatch(event?.mode)),
+      this.events.on("game:menu", () => this.returnToMenu()),
+      this.events.on("controls:change", (settings) => this.applyControls(settings)),
       this.events.on("game:pause", () => this.applyPause()),
       this.events.on("game:resume", () => this.applyResume()),
       this.events.on("game:restart", () => this.applyRestart()),
@@ -276,32 +288,66 @@ export class Game {
           this.events.emit("game:pause", { source: "pointer-lock-loss" });
         }
       }),
+      this.events.on("player:damage", () => {
+        if (this.state.mission) this.relayMission.interrupt();
+      }),
       this.events.on("enemy:death", (event) => this.onEnemyDeath(event)),
       this.events.on("player:death", (event) => this.onPlayerDeath(event)),
     );
   }
 
-  activateMatch() {
+  activateMatch(mode = "sweep") {
     if (this.state.phase === "playing") return;
     if (this.state.phase === "victory" || this.state.phase === "defeat") {
       this.applyRestart();
       return;
     }
-    this.state.phase = "playing";
-    this.captureOverride = null;
-    this.player.setEnabled(true);
-    this.rifle.setEnabled(true);
-    this.input.enabled = true;
-    this.clock.clearAccumulator();
-    this.audio.resume();
-    if (!this.options.capture && !this.manualSimulation) {
-      this.input.requestPointerLock().catch(() => {});
+    this.state.mode = mode === "relay" && this.relayMission ? "relay" : "sweep";
+    this.state.mission = this.state.mode === "relay" ? this.relayMission.state : null;
+    if (this.world.spawn) {
+      this.player.setSpawn(this.world.spawn.position, this.state.mode === "relay" ? -0.12 : this.world.spawn.yaw);
     }
+    this._resetRound();
+    this.audio.resume();
+  }
+
+  returnToMenu() {
+    this.state.phase = "menu";
+    this.state.mode = "sweep";
+    this.state.mission = null;
+    this.world.setRouteStatus?.(null, []);
+    this.state.level = 1;
+    this.state.seed = this.baseSeed;
+    if (this.world.spawn) this.player.setSpawn(this.world.spawn.position, this.world.spawn.yaw);
+    this.player.reset(this.baseSeed);
+    this.player.setEnabled(false);
+    this.rifle.setEnabled(false);
+    this.input.enabled = false;
+    this.input.reset();
+    this.input.exitPointerLock();
+    this.clock.clearAccumulator();
+  }
+
+  requestPointerLock() {
+    if (!this.options.capture && !this.manualSimulation) {
+      this.input.requestPointerLock().catch(() => {
+        if (this.state.phase === "playing") {
+          this.events.emit("game:pause", { source: "pointer-lock-unavailable" });
+        }
+      });
+    }
+  }
+
+  applyControls(settings) {
+    this.state.controls = normalizeControls(settings);
+    this.player.applyControls(this.state.controls);
+    saveControls(this.state.controls);
   }
 
   applyPause() {
     if (this.state.phase !== "playing") return;
     this.state.phase = "paused";
+    this.relayMission?.clearHold();
     this.player.setEnabled(false);
     this.rifle.setEnabled(false);
     this.input.enabled = false;
@@ -318,9 +364,7 @@ export class Game {
     this.input.enabled = true;
     this.clock.clearAccumulator();
     this.audio.resume();
-    if (!this.options.capture && !this.manualSimulation) {
-      this.input.requestPointerLock().catch(() => {});
-    }
+    this.requestPointerLock();
   }
 
   applyRestart() {
@@ -328,7 +372,7 @@ export class Game {
   }
 
   advanceLevel() {
-    if (this.state.phase !== "victory") return false;
+    if (this.state.phase !== "victory" || this.state.mode !== "sweep") return false;
     this.state.level += 1;
     this.state.seed = deriveLevelSeed(this.baseSeed, this.state.level);
     this.state.requiredKills = this._enemyCountForLevel(this.state.level);
@@ -351,6 +395,8 @@ export class Game {
     this.state.kills = 0;
     this.state.elapsed = 0;
     this.state.requiredKills = this._enemyCountForLevel();
+    this.relayMission?.reset();
+    this.syncRelaySignals();
     this.rng.reset(this.state.seed);
     this.input.reset();
     this.player.reset(this.state.seed);
@@ -361,6 +407,7 @@ export class Game {
       activeLimit: ACTIVE_ENEMY_LIMIT,
       playerSpawn: this.player.spawnPosition,
       safeRadius: ENEMY_INITIAL_SAFE_RADIUS,
+      placements: this.state.mode === "relay" ? RELAY_PATROLS : null,
     });
     this.player.setEnabled(true);
     this.rifle.setEnabled(true);
@@ -368,9 +415,7 @@ export class Game {
     this.captureOverride = null;
     this.captureTargetId = null;
     this.clock.clearAccumulator();
-    if (!this.options.capture && !this.manualSimulation) {
-      this.input.requestPointerLock().catch(() => {});
-    }
+    this.requestPointerLock();
   }
 
   applyQuality(name) {
@@ -382,7 +427,7 @@ export class Game {
   onEnemyDeath() {
     if (this.state.phase !== "playing") return;
     this.state.kills += 1;
-    if (this.state.kills >= this.state.requiredKills) {
+    if (this.state.mode === "sweep" && this.state.kills >= this.state.requiredKills) {
       this.finishMatch("victory");
     }
   }
@@ -393,7 +438,7 @@ export class Game {
 
   finishMatch(result) {
     this.state.phase = result;
-    if (result === "victory") {
+    if (result === "victory" && this.state.mode === "sweep") {
       const persisted = writeHighestClearedLevel(this.state.level);
       this.state.highestClearedLevel = Math.max(
         this.state.highestClearedLevel,
@@ -412,6 +457,8 @@ export class Game {
       level: this.state.level,
       highestClearedLevel: this.state.highestClearedLevel,
       requiredKills: this.state.requiredKills,
+      mode: this.state.mode,
+      mission: this.state.mission,
     });
   }
 
@@ -424,14 +471,52 @@ export class Game {
     }
     this.state.elapsed += dt;
     this.player.fixedUpdate(dt);
+    if (this.state.phase !== "playing") return;
+    this.player.syncAimCamera();
     this.rifle.fixedUpdate(dt);
     this.enemies.fixedUpdate(dt);
     this.effects.fixedUpdate(dt);
+    if (this.state.phase === "playing" && this.state.mission) {
+      this.updateRelayMission(dt);
+    }
+  }
+
+  syncRelaySignals() {
+    const mission = this.state.mission;
+    const completed = mission ? this.world.route.slice(0, mission.completed).map(({ id }) => id) : [];
+    this.world.setRouteStatus?.(mission?.target?.id ?? null, completed);
+  }
+
+  updateRelayMission(dt) {
+    const previousTarget = this.relayMission.state.target;
+    const result = this.relayMission.update(dt, this.player.position, this.input.isDown("KeyF"));
+    if (!result) return;
+    this.syncRelaySignals();
+    this.events.emit("audio:play", { name: "ui-confirm", volume: 0.7 });
+    if (result === "extracted") {
+      this.finishMatch("victory");
+      return;
+    }
+    this.enemies.forceAlert(previousTarget.position, 24);
+    const { completed, total } = this.relayMission.state;
+    this.events.emit("ui:announce", {
+      text: completed === total ? "All relays online · proceed to extraction" : `Relay ${completed} online`,
+      tone: "success",
+      duration: 2.3,
+    });
   }
 
   update(dt, alpha = 1) {
     this.player.update(dt, alpha);
     this.rifle.update(dt, alpha);
+    if (!this.captureOverride) {
+      const camera = this.rendering.camera;
+      const fov = THREE.MathUtils.lerp(72, 61, this.rifle.ads);
+      if (Math.abs(camera.fov - fov) > 0.015) {
+        camera.fov = fov;
+        camera.updateProjectionMatrix();
+      }
+    }
     this.enemies.update(dt, alpha);
     this.effects.update(dt, alpha);
     this.audio.setListener(this.rendering.camera);
@@ -440,11 +525,9 @@ export class Game {
       dt,
       player: this.player.snapshot,
       weapon: this.rifle.snapshot,
-      effects: this.effects.snapshot,
-      enemies: this.enemies.snapshot,
       state: this.state,
     });
-    this.rendering.render();
+    this.rendering.render(this.state.phase === "playing" && !this.state.controls.reducedMotion ? dt : 0);
     this.diagnostics.recordFrame(dt);
     this.diagnostics.rendererInfo = {
       memory: { ...this.rendering.renderer.info.memory },
@@ -453,7 +536,6 @@ export class Game {
     this.diagnostics.set("listeners", this.events.listenerCount());
     this.diagnostics.set("enemies", this.enemies.livingCount);
     this.diagnostics.set("particles", this.effects.snapshot.activeParticles);
-    this.input.endFrame();
   }
 
   start() {
@@ -463,10 +545,11 @@ export class Game {
     const loop = (timestamp) => {
       if (!this.running) return;
       if (!this.manualSimulation) {
-        const frame = this.clock.tick(
-          timestamp * 0.001,
-          (dt) => this.fixedUpdate(dt),
-        );
+        this.player.sampleLook();
+        const frame = this.clock.tick(timestamp * 0.001, (dt) => {
+          this.fixedUpdate(dt);
+          this.input.endFrame();
+        });
         this.update(frame.frame, frame.alpha);
       } else if (!this.performanceRunning) {
         this.rendering.render();
@@ -478,7 +561,10 @@ export class Game {
 
   async manualStep(frames = 1) {
     const count = THREE.MathUtils.clamp(Math.floor(frames), 0, 3600);
-    for (let i = 0; i < count; i += 1) this.fixedUpdate(FIXED_STEP);
+    for (let i = 0; i < count; i += 1) {
+      this.fixedUpdate(FIXED_STEP);
+      this.input.endFrame();
+    }
     // Fixed simulation can be advanced in one deterministic batch, but
     // presentation dampers must still receive the elapsed wall-clock span.
     // Cap it to avoid feeding multi-second deltas into camera/effect easing.
@@ -732,6 +818,8 @@ export class Game {
   stateSnapshot() {
     return {
       phase: this.state.phase,
+      mode: this.state.mode,
+      mission: this.state.mission ? structuredClone(this.state.mission) : null,
       level: this.state.level,
       baseEnemyCount: this.state.baseEnemyCount,
       highestClearedLevel: this.state.highestClearedLevel,
@@ -807,8 +895,8 @@ export class Game {
         ...this.diagnostics.snapshot(),
         rendererInfo: this.diagnostics.rendererInfo,
       }),
-      start: async () => {
-        this.events.emit("game:start", { source: "test" });
+      start: async (mode = "sweep") => {
+        this.events.emit("game:start", { source: "test", mode });
         return this.stateSnapshot();
       },
       pause: async () => {
@@ -835,6 +923,10 @@ export class Game {
       },
       snapshot: () => this.snapshot(),
       setInput: (record) => this.input.setSynthetic(record),
+      missionRoute: () => this.relayMission?.checkpoints.map((checkpoint) => ({
+        ...checkpoint,
+        position: vectorSnapshot(checkpoint.position),
+      })),
       step: (frames) => this.manualStep(frames),
       teleport: async (position, yaw = 0) => {
         if (toVector(position, _capturePosition)) {

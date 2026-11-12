@@ -1,11 +1,16 @@
 {
   "status": "passed",
-  "durationMs": 567939.834782,
+  "durationMs": 6953.129482,
   "results": [
     {
       "name": "physics step contract",
       "status": "passed",
       "detail": "10 collision cases"
+    },
+    {
+      "name": "district route contract",
+      "status": "passed",
+      "detail": "4 reachable objective locations across 2 seeds"
     },
     {
       "name": "enemy AI contract",
@@ -40,7 +45,7 @@
     {
       "name": "deterministic movement",
       "status": "passed",
-      "detail": "8.39 m"
+      "detail": "8.49 m"
     },
     {
       "name": "advanced locomotion",
@@ -108,6 +113,16 @@
       "detail": ""
     },
     {
+      "name": "relay route and extraction",
+      "status": "passed",
+      "detail": "3 relays, early exit, damage, pause, replay"
+    },
+    {
+      "name": "short click and same-step aim",
+      "status": "passed",
+      "detail": "yaw difference 0.0072 rad"
+    },
+    {
       "name": "console and page errors",
       "status": "passed",
       "detail": "none"
@@ -120,39 +135,39 @@
     "httpErrors": []
   },
   "gameDiagnostics": {
-    "frameCount": 43,
+    "frameCount": 59,
     "medianFrameMs": 50.00000074505806,
     "p95FrameMs": 250,
     "medianFps": 19.99999970197678,
-    "elapsedMs": 557307.2999999998,
+    "elapsedMs": 5667.399999999907,
     "counters": {
-      "listeners": 60,
-      "enemies": 12,
-      "particles": 0
+      "listeners": 65,
+      "enemies": 7,
+      "particles": 5
     },
     "errors": [],
     "renderer": {
       "memory": {
-        "geometries": 358,
-        "textures": 88
+        "geometries": 365,
+        "textures": 90
       },
       "render": {
-        "frame": 2289,
-        "calls": 0,
-        "triangles": 0,
+        "frame": 2174,
+        "calls": 93,
+        "triangles": 12808,
         "points": 0,
         "lines": 0
       }
     },
     "rendererInfo": {
       "memory": {
-        "geometries": 358,
-        "textures": 88
+        "geometries": 365,
+        "textures": 90
       },
       "render": {
-        "frame": 2289,
-        "calls": 0,
-        "triangles": 0,
+        "frame": 2174,
+        "calls": 93,
+        "triangles": 12808,
         "points": 0,
         "lines": 0
       }

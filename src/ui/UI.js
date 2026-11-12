@@ -1,3 +1,14 @@
+const CONTROL_FIELDS = `
+  <h2 class="cl-setting-heading">Aim and camera</h2>
+  <label class="cl-setting"><span>Mouse speed <output data-control-value="sensitivity"></output></span>
+    <input type="range" data-control="sensitivity" min="20" max="220" step="5">
+  </label>
+  <label class="cl-setting"><span>Aim speed <output data-control-value="adsSensitivity"></output></span>
+    <input type="range" data-control="adsSensitivity" min="25" max="100" step="5">
+  </label>
+  <label class="cl-setting cl-check"><input type="checkbox" data-control="reducedMotion"> Reduce camera sway</label>
+`;
+
 const UI_STYLE_ID = 'cinderline-ui-styles';
 
 const UI_STYLES = `
@@ -27,7 +38,7 @@ const UI_STYLES = `
     linear-gradient(100deg, rgba(5,9,9,.94) 0 35%, rgba(6,11,11,.62) 58%, rgba(5,9,9,.2)),
     radial-gradient(circle at 72% 48%, rgba(186,120,42,.11), transparent 45%);
 }
-.cl-screen.is-visible { display:grid; }
+.cl-screen.is-visible { display:grid; overflow:auto; }
 .cl-panel {
   width:min(1120px, calc(100vw - 80px)); min-height:min(640px, calc(100vh - 70px));
   display:grid; grid-template-columns:minmax(360px, 1.15fr) minmax(270px, .65fr);
@@ -89,6 +100,12 @@ const UI_STYLES = `
   letter-spacing:.12em; text-transform:uppercase;
 }
 .cl-quality button:hover,.cl-quality button.is-active { color:#111; background:var(--cl-accent); border-color:var(--cl-accent); }
+.cl-setting-heading { margin-top:22px !important; margin-bottom:10px !important; }
+.cl-setting { display:grid; grid-template-columns:1fr 110px; align-items:center; gap:8px; min-height:26px;
+  color:#c3ccc4; font-size:10px; text-transform:none; letter-spacing:.06em; }
+.cl-setting input { accent-color:var(--cl-accent); min-width:0; }
+.cl-setting output { color:var(--cl-accent); padding-left:5px; }
+.cl-check { display:flex; align-items:center; margin-top:3px; cursor:pointer; }
 .cl-status-title { font-size:clamp(58px,9vw,128px); }
 .cl-status-data { display:flex; gap:34px; margin:38px 0 32px; }
 .cl-stat { min-width:100px; border-top:1px solid var(--cl-line); padding-top:9px; }
@@ -113,6 +130,26 @@ const UI_STYLES = `
 }
 .cl-objective b { color:var(--cl-ink); font-size:11px; }
 .cl-objective i { width:5px; height:5px; background:var(--cl-accent); transform:rotate(45deg); box-shadow:0 0 8px var(--cl-accent); }
+.cl-objective > [hidden], .cl-route[hidden], .cl-route-hint[hidden], .cl-interact[hidden], .cl-btn[hidden] { display:none; }
+.cl-route {
+  display:flex; align-items:center; justify-content:center; gap:9px; width:max-content; max-width:100%;
+  margin:7px auto 0; padding:6px 12px; color:#e9eee6; background:rgba(6,12,17,.8);
+  border:1px solid rgba(186,208,217,.24); font-size:11px; font-weight:700;
+}
+.cl-route-arrow { width:15px; height:15px; display:grid; place-items:center; color:var(--route-accent,var(--cl-accent)); }
+.cl-route-distance { color:var(--route-accent,var(--cl-accent)); }
+.cl-route-hint {
+  display:table; margin:3px auto 0; padding:2px 7px; color:#d8ded9; background:rgba(6,12,17,.63);
+  font-size:11px; letter-spacing:.03em; text-transform:none; line-height:1.5;
+}
+.cl-interact {
+  position:absolute; top:calc(50% + 52px); left:50%; transform:translateX(-50%);
+  width:min(270px,85vw); text-align:center; border:1px solid rgba(207,225,226,.32);
+  background:rgba(7,12,16,.92); font-size:10px; line-height:1.65; padding:8px 14px;
+}
+.cl-interact kbd { display:inline-block; padding:1px 5px; margin-right:5px; border:1px solid #8c9da1; color:var(--cl-accent); }
+.cl-interact-meter { margin-top:6px; height:3px; background:#293338; overflow:hidden; }
+.cl-interact-meter i { display:block; height:100%; background:var(--cl-accent); transform-origin:left; }
 .cl-bottom-left { position:absolute; left:32px; bottom:27px; display:flex; align-items:flex-end; gap:18px; }
 .cl-health-mark {
   width:62px; height:62px; display:grid; place-items:center; position:relative;
@@ -186,7 +223,8 @@ const UI_STYLES = `
 .cl-pause-tip { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); color:rgba(230,235,227,.45); font-size:8px; }
 @media (max-width: 760px) {
   .cl-panel { width:calc(100vw - 44px); grid-template-columns:1fr; gap:28px; align-content:center; }
-  .cl-controls { display:none; } .cl-bottom-left{left:18px}.cl-bottom-right{right:18px}
+  .cl-panel { padding:30px 0; } .cl-controls { display:none; } .cl-pause .cl-controls { display:block; }
+  .cl-bottom-left{left:18px}.cl-bottom-right{right:18px} .cl-topbar{width:min(94vw,560px)}
 }
 `;
 
@@ -296,12 +334,13 @@ export class UI {
       <section class="cl-screen cl-start" data-screen="start" aria-label="Start screen">
         <div class="cl-panel">
           <div>
-            <div class="cl-kicker" data-start-operation>OPERATION 1 · ASH MARKET</div>
+            <div class="cl-kicker">ASH MARKET · INDUSTRIAL QUARTER</div>
             <h1 class="cl-title">CINDER<br>LINE<small>ONE SHOT</small></h1>
-            <p class="cl-mission">Sweep the Ash Market industrial quarter. Break contact when needed, use cover, and neutralize every hostile in the district.</p>
+            <p class="cl-mission">Restore three relays across Ash Market and reach the extraction point.</p>
             <div class="cl-record" data-highest-cleared hidden></div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="start">Deploy</button>
+              <button class="cl-btn" data-action="sweep">Endless sweep</button>
             </div>
           </div>
           <div class="cl-controls">
@@ -312,6 +351,7 @@ export class UI {
             <div class="cl-control"><kbd>Shift · Ctrl / C</kbd><span>Sprint · crouch / slide</span></div>
             <div class="cl-control"><kbd>Space</kbd><span>Jump / mantle</span></div>
             <div class="cl-control"><kbd>Q · E</kbd><span>Lean left · right</span></div>
+            <div class="cl-control"><kbd>Hold F</kbd><span>Operate a relay or extract</span></div>
             <div class="cl-control"><kbd>Esc</kbd><span>Pause / release pointer lock</span></div>
             <h2 style="margin-top:22px">Render profile</h2>
             <div class="cl-quality" role="group" aria-label="Graphics quality">
@@ -319,6 +359,7 @@ export class UI {
               <button data-quality="medium">Medium</button>
               <button data-quality="high">High</button>
             </div>
+            ${CONTROL_FIELDS}
           </div>
         </div>
       </section>
@@ -327,10 +368,11 @@ export class UI {
           <div>
             <div class="cl-kicker">TACTICAL HOLD</div>
             <h1 class="cl-title cl-status-title">PAUSED</h1>
-            <p class="cl-mission">Simulation suspended. Input has been cleared and weapon controls are safe.</p>
+            <p class="cl-mission" data-pause-message>Adjust aim and graphics or return to the operation.</p>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="resume">Resume</button>
               <button class="cl-btn" data-action="restart">Restart operation</button>
+              <button class="cl-btn" data-action="menu">Main menu</button>
             </div>
           </div>
           <div class="cl-controls">
@@ -340,6 +382,7 @@ export class UI {
               <button data-quality="medium">Medium</button>
               <button data-quality="high">High</button>
             </div>
+            ${CONTROL_FIELDS}
           </div>
         </div>
       </section>
@@ -354,7 +397,8 @@ export class UI {
             </div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="next-level">Next operation</button>
-              <button class="cl-btn" data-action="restart">Restart current</button>
+              <button class="cl-btn" data-action="restart">Replay</button>
+              <button class="cl-btn" data-action="menu">Main menu</button>
             </div>
           </div>
         </div>
@@ -368,14 +412,19 @@ export class UI {
               <div class="cl-stat"><strong data-result-kills>0</strong><span>Neutralized</span></div>
               <div class="cl-stat"><strong data-result-time>00:00</strong><span>Elapsed</span></div>
             </div>
-            <button class="cl-btn is-primary" data-action="restart">Redeploy</button>
+            <div class="cl-button-row">
+              <button class="cl-btn is-primary" data-action="restart">Redeploy</button>
+              <button class="cl-btn" data-action="menu">Main menu</button>
+            </div>
           </div>
         </div>
       </section>
       <div class="cl-hud is-hidden" aria-label="Heads up display">
         <div class="cl-topbar">
           <div class="cl-compass"><span data-cardinal>N</span><span class="cl-heading" data-heading>000</span></div>
-          <div class="cl-objective"><span class="cl-operation">Operation <b data-level>1</b></span><i></i><span>Neutralize hostiles</span><b><span data-kills>0</span> / <span data-required>7</span></b></div>
+          <div class="cl-objective"><span class="cl-operation">Operation <b data-level>1</b></span><i></i><span data-objective-name>Neutralize hostiles</span><b data-sweep-progress><span data-kills>0</span> / <span data-required>7</span></b><b data-relay-progress hidden>0 / 3</b></div>
+          <div class="cl-route" hidden><span class="cl-route-arrow" aria-hidden="true">▲</span><span data-route-label></span><span class="cl-route-distance" data-route-distance></span></div>
+          <p class="cl-route-hint" data-route-hint hidden></p>
         </div>
         <div class="cl-bottom-left">
           <div class="cl-health-mark" style="--health-angle:360deg"><span class="cl-health-value" data-health>100</span></div>
@@ -391,6 +440,7 @@ export class UI {
           <i class="cl-crosshair-piece v t"></i><i class="cl-crosshair-piece v b"></i>
           <i class="cl-crosshair-dot"></i>
         </div>
+        <div class="cl-interact" hidden><kbd>F</kbd><span data-interact-label></span><div class="cl-interact-meter"><i></i></div></div>
         <div class="cl-hitmarker"><i></i><i></i><i></i><i></i></div>
         <div class="cl-damage-ring"></div>
         <div class="cl-damage-vignette"></div>
@@ -419,11 +469,22 @@ export class UI {
     this.nodes.kills = query('[data-kills]');
     this.nodes.required = query('[data-required]');
     this.nodes.level = query('[data-level]');
-    this.nodes.startOperation = query('[data-start-operation]');
     this.nodes.highestCleared = query('[data-highest-cleared]');
     this.nodes.victoryOperation = query('[data-victory-operation]');
     this.nodes.heading = query('[data-heading]');
     this.nodes.cardinal = query('[data-cardinal]');
+    this.nodes.objective = query('[data-objective-name]');
+    this.nodes.sweepProgress = query('[data-sweep-progress]');
+    this.nodes.relayProgress = query('[data-relay-progress]');
+    this.nodes.route = query('.cl-route');
+    this.nodes.routeArrow = query('.cl-route-arrow');
+    this.nodes.routeLabel = query('[data-route-label]');
+    this.nodes.routeDistance = query('[data-route-distance]');
+    this.nodes.routeHint = query('[data-route-hint]');
+    this.nodes.interact = query('.cl-interact');
+    this.nodes.interactLabel = query('[data-interact-label]');
+    this.nodes.interactFill = query('.cl-interact-meter i');
+    this.nodes.pauseMessage = query('[data-pause-message]');
 
     this.root.querySelectorAll('[data-action]').forEach((button) => {
       const handler = () => this._action(button.dataset.action);
@@ -435,17 +496,46 @@ export class UI {
       button.addEventListener('click', handler);
       this.domListeners.push(() => button.removeEventListener('click', handler));
     });
+    this.root.querySelectorAll('[data-control]').forEach((input) => {
+      const name = input.dataset.control;
+      const update = () => {
+        const value = input.type === 'checkbox' ? input.checked : input.valueAsNumber;
+        emit(this.events, 'controls:change', { ...this.context.state.controls, [name]: value });
+        this._syncControls();
+      };
+      input.addEventListener('change', update);
+      this.domListeners.push(() => input.removeEventListener('change', update));
+    });
+    this._syncControls();
     this._setQuality(this.quality, false);
+  }
+
+  _syncControls() {
+    const settings = this.context.state.controls;
+    this.root.querySelectorAll('[data-control]').forEach((input) => {
+      const value = settings[input.dataset.control];
+      if (input.type === 'checkbox') input.checked = value;
+      else input.value = String(value);
+    });
+    this.root.querySelectorAll('[data-control-value]').forEach((output) => {
+      output.textContent = `${settings[output.dataset.controlValue]}%`;
+    });
   }
 
   _bindEvents() {
     this.unsubscribers.push(
       subscribe(this.events, 'game:start', () => this.setScreen('playing')),
-      subscribe(this.events, 'game:pause', () => this.setScreen('pause')),
+      subscribe(this.events, 'game:pause', ({ source } = {}) => {
+        this.nodes.pauseMessage.textContent = source === 'pointer-lock-unavailable'
+          ? 'Mouse capture failed. Click Resume to try again.'
+          : 'Adjust aim and graphics or return to the operation.';
+        this.setScreen('pause');
+      }),
+      subscribe(this.events, 'game:menu', () => this.setScreen('start')),
       subscribe(this.events, 'game:resume', () => this.setScreen('playing')),
       subscribe(this.events, 'game:restart', () => this.reset()),
       subscribe(this.events, 'game:next-level', () => {
-        this.reset('NEXT OPERATION DEPLOYED');
+        if (this.context.state.phase === 'playing') this.reset('NEXT OPERATION DEPLOYED');
       }),
       subscribe(this.events, 'game:victory', (data) => this.setScreen('victory', data)),
       subscribe(this.events, 'game:defeat', (data) => this.setScreen('defeat', data)),
@@ -478,9 +568,11 @@ export class UI {
   }
 
   _action(action) {
-    if (action === 'start') {
-      emit(this.events, 'game:start', { source: 'ui' });
+    if (action === 'start' || action === 'sweep') {
+      emit(this.events, 'game:start', { source: 'ui', mode: action === 'start' ? 'relay' : 'sweep' });
       emit(this.events, 'audio:play', { name: 'ui-confirm' });
+    } else if (action === 'menu') {
+      emit(this.events, 'game:menu', { source: 'ui' });
     } else if (action === 'resume') {
       emit(this.events, 'game:resume', { source: 'ui' });
       emit(this.events, 'audio:play', { name: 'ui-confirm' });
@@ -520,6 +612,12 @@ export class UI {
       const elapsed = Number(data?.elapsed ?? this.last.elapsed ?? 0);
       screen.querySelector('[data-result-kills]').textContent = String(kills);
       screen.querySelector('[data-result-time]').textContent = this._formatTime(elapsed);
+      if (canonical === 'victory') {
+        const relay = data?.mode === 'relay';
+        screen.querySelector('[data-action="next-level"]').hidden = relay;
+        this.nodes.victoryOperation.textContent = relay ? 'RELAY RUN · EXTRACTED'
+          : `OPERATION ${this.context.state.level} · DISTRICT SECURE`;
+      }
     }
     if (data?.requiredKills !== undefined) {
       this.nodes.required.textContent = String(data.requiredKills);
@@ -535,9 +633,7 @@ export class UI {
       0,
     );
     this._text('level', level);
-    this.nodes.startOperation.textContent = `OPERATION ${level} · ASH MARKET`;
-    this.nodes.victoryOperation.textContent =
-      `OPERATION ${level} · DISTRICT SECURE`;
+
     this.nodes.highestCleared.hidden = highest <= 0;
     this.nodes.highestCleared.textContent =
       highest > 0 ? `HIGHEST CLEARED · OPERATION ${highest}` : '';
@@ -556,7 +652,7 @@ export class UI {
     const level = positiveSafeInteger(state.level ?? snapshot.level, 1);
     const elapsed = Number(state.elapsed ?? snapshot.elapsed ?? 0);
     const yaw = Number(player.yaw ?? snapshot.yaw ?? this.context?.camera?.rotation?.y ?? 0);
-    const ads = Boolean(weapon.ads ?? weapon.isADS ?? player.ads);
+    const ads = Number(weapon.ads ?? weapon.isADS ?? player.ads) > 0.72;
     const speed = Number(player.speed ?? player.velocity?.length?.() ?? 0);
     const baseSpread = Number(weapon.spread ?? weapon.crosshairSpread ?? (ads ? 1.5 : 7 + speed * 0.7));
     this.crosshairKick = Math.max(0, this.crosshairKick - 22 * (snapshot.dt ?? 1 / 60));
@@ -584,8 +680,9 @@ export class UI {
 
     let degrees = ((-yaw * 180 / Math.PI) % 360 + 360) % 360;
     if (Math.abs(degrees - 360) < 0.5) degrees = 0;
-    this.nodes.heading.textContent = String(Math.round(degrees)).padStart(3, '0');
-    this.nodes.cardinal.textContent = CARDINALS[Math.round(degrees / 45) % 8];
+    this._text('heading', String(Math.round(degrees)).padStart(3, '0'));
+    this._text('cardinal', CARDINALS[Math.round(degrees / 45) % 8]);
+    this._renderMission(state.mission, player, yaw);
 
     const now = performance.now();
     if (now > this.hitmarkerUntil) {
@@ -604,6 +701,38 @@ export class UI {
         arc.node.remove();
         this.damageArcs.splice(i, 1);
       }
+    }
+  }
+
+  _renderMission(mission, player, yaw) {
+    const target = mission?.target;
+    const active = Boolean(target);
+    this.nodes.sweepProgress.hidden = Boolean(mission);
+    this.nodes.relayProgress.hidden = !mission;
+    this.nodes.route.hidden = !active;
+    this.nodes.routeHint.hidden = !active || mission.nearby;
+    this.nodes.interact.hidden = !mission?.nearby;
+    if (!active || !player.position) {
+      this._text('objective', mission?.extracted ? 'Extraction complete' : 'Neutralize hostiles');
+      return;
+    }
+
+    const extracting = mission.completed === mission.total;
+    this._text('objective', extracting ? 'Extract' : 'Restore relays');
+    this._text('relayProgress', `${mission.completed} / ${mission.total}`);
+    this._text('routeLabel', target.label);
+    this._text('routeHint', target.description);
+    const dx = target.position.x - player.position.x;
+    const dz = target.position.z - player.position.z;
+    this._text('routeDistance', `${Math.round(Math.hypot(dx, dz))} m`);
+    const angle = Math.atan2(dx, -dz) + yaw;
+    this.nodes.routeArrow.style.transform = `rotate(${angle}rad)`;
+    this.nodes.route.style.setProperty('--route-accent', target.accent);
+
+    if (mission.nearby) {
+      this._text('interactLabel', mission.interrupted ? 'Signal interrupted'
+        : extracting ? 'Hold to extract' : 'Hold to restore relay');
+      this.nodes.interactFill.style.transform = `scaleX(${mission.progress})`;
     }
   }
 

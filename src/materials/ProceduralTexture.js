@@ -76,6 +76,7 @@ function styleSample(style, x, y, size, seed, sample) {
   sample.roughnessBias = (micro - 0.5) * 0.2 + (stain - 0.5) * 0.12;
   sample.colorBias = (macro - 0.5) * 0.18 + (stain - 0.5) * 0.12;
   sample.accent = 0;
+  sample.mortar = 0;
 
   switch (style) {
     case 'concrete': {
@@ -105,13 +106,13 @@ function styleSample(style, x, y, size, seed, sample) {
       const localY = (ny * rows) % 1;
       const shiftedX = nx * 6 + ((row & 1) ? 0.5 : 0);
       const localX = shiftedX % 1;
-      const mortar = localY < 0.075 || localY > 0.925 || localX < 0.045 || localX > 0.955;
+      const mortar = localY < 0.055 || localY > 0.945 || localX < 0.027 || localX > 0.973;
       const brickVariation = hashUnit(Math.floor(shiftedX), row, seed ^ 0x27d4eb2f);
       if (mortar) {
-        sample.height = 0.15 + micro * 0.06;
-        sample.colorBias = -0.35;
+        sample.height = 0.27 + micro * 0.055;
+        sample.colorBias = -0.19;
         sample.roughnessBias = 0.18;
-        sample.accent = -0.62;
+        sample.mortar = 0.77 + macro * 0.18;
       } else {
         sample.height = 0.55 + macro * 0.32;
         sample.colorBias += (brickVariation - 0.5) * 0.34;
@@ -126,22 +127,22 @@ function styleSample(style, x, y, size, seed, sample) {
             TAU * (nx * 1.93 + ny * 1.17 + periodicValueNoise(x, y, size, 5, seed) * 0.52),
           ),
         );
-      const crackMask = crackWave < 0.026 && stain > 0.54 ? 1 : 0;
-      const chipped = periodicValueNoise(x, y, size, 14, seed ^ 0x165667b1) > 0.77 ? 1 : 0;
-      sample.height -= crackMask * 0.46 + chipped * 0.12;
-      sample.colorBias -= crackMask * 0.55 + chipped * 0.18;
-      sample.roughnessBias += crackMask * 0.22 + chipped * 0.13;
-      sample.accent = -chipped * 0.21;
+      const crackMask = crackWave < 0.016 && stain > 0.57 ? 1 : 0;
+      const loosePaint = periodicValueNoise(x, y, size, 29, seed ^ 0x165667b1);
+      const chipped = clamp01((loosePaint - 0.73) * 2.8) * clamp01((stain - 0.41) * 2.2);
+      sample.height -= crackMask * 0.20 + chipped * 0.09;
+      sample.colorBias -= crackMask * 0.22 + chipped * 0.18;
+      sample.roughnessBias += crackMask * 0.12 + chipped * 0.15;
       break;
     }
     case 'asphalt': {
       const stone = periodicValueNoise(x, y, size, 43, seed ^ 0xd3a2646c);
       const lightStone = stone > 0.69 ? (stone - 0.69) * 2.8 : 0;
       const tar = periodicValueNoise(x, y, size, 7, seed ^ 0xfd7046c5);
-      sample.height = stone * 0.68 + micro * 0.18 + tar * 0.14;
-      sample.colorBias = (stone - 0.5) * 0.28 - (tar - 0.5) * 0.08;
-      sample.roughnessBias = (stone - 0.5) * 0.24;
-      sample.accent = lightStone * 0.18;
+      sample.height = stone * 0.38 + micro * 0.13 + tar * 0.14 + 0.15;
+      sample.colorBias = (stone - 0.5) * 0.16 - (tar - 0.5) * 0.16;
+      sample.roughnessBias = (stone - 0.5) * 0.17 - (tar - 0.5) * 0.19;
+      sample.accent = lightStone * 0.13;
       break;
     }
     case 'earth': {
@@ -304,6 +305,7 @@ export function createProceduralTextureSet(recipe, seed, requestedSize = 256) {
     roughnessBias: 0,
     colorBias: 0,
     accent: 0,
+    mortar: 0,
   };
 
   for (let y = 0; y < size; y += 1) {
@@ -316,6 +318,12 @@ export function createProceduralTextureSet(recipe, seed, requestedSize = 256) {
         0.5 + sample.colorBias + sample.accent * (hashUnit(x, y, seed ^ 0x1b873593) - 0.3),
       );
       colorMix(color, recipe.dark, recipe.light, mixAmount);
+      if (sample.mortar) {
+        const mortar = 0.32 + sample.roughnessBias * 0.18 + sample.height * 0.14;
+        color[0] = lerp(color[0], mortar, sample.mortar);
+        color[1] = lerp(color[1], mortar * 0.94, sample.mortar);
+        color[2] = lerp(color[2], mortar * 0.87, sample.mortar);
+      }
       writePixel(albedo, byte, color[0], color[1], color[2]);
 
       height[pixel] = clamp01(sample.height);

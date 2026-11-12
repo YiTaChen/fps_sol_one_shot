@@ -9,14 +9,14 @@ const MUZZLE = new THREE.Vector3();
 const TRACER_END = new THREE.Vector3();
 const LOCAL_TARGET = new THREE.Vector3();
 const POSE_POSITION = new THREE.Vector3();
-const HIP_POSITION = new THREE.Vector3(0.19, -0.19, -0.68);
+const HIP_POSITION = new THREE.Vector3(0.225, -0.248, -0.71);
 const ADS_POSITION = new THREE.Vector3(0, -0.18, -0.6);
 const SPRINT_POSITION = new THREE.Vector3(0.38, -0.39, -0.24);
 const LEFT_HAND_HOME = new THREE.Vector3(-0.025, -0.006, -0.34);
 const POSE_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
 const POSE_QUATERNION = new THREE.Quaternion();
 const HIP_QUATERNION = new THREE.Quaternion().setFromEuler(
-  new THREE.Euler(0.028, -0.075, 0.022, 'YXZ'),
+  new THREE.Euler(0.055, -0.105, -0.042, 'YXZ'),
 );
 const ADS_QUATERNION = new THREE.Quaternion();
 const SPRINT_QUATERNION = new THREE.Quaternion().setFromEuler(
@@ -191,6 +191,10 @@ function makeTexture(base, variation, seed, roughness = false) {
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(3.4, 5.5);
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = 4;
   texture.colorSpace = roughness ? THREE.NoColorSpace : THREE.SRGBColorSpace;
   texture.needsUpdate = true;
   return texture;
@@ -351,6 +355,7 @@ export class Rifle {
     this.dryCooldown = 0;
     this.shotIndex = 0;
     this.recoilBloom = 0;
+    this.triggerBuffer = 0;
     this.visualRecoil = 0;
     this._firePose = 0;
     this._time = 0;
@@ -407,6 +412,7 @@ export class Rifle {
     }, this._disposers);
     listen(this.events, 'player:death', () => {
       this.triggerHeld = false;
+      this.triggerBuffer = 0;
       this.adsWanted = false;
       this.enabled = false;
     }, this._disposers);
@@ -473,6 +479,7 @@ export class Rifle {
     this.enabled = Boolean(enabled);
     if (!this.enabled) {
       this.triggerHeld = false;
+      this.triggerBuffer = 0;
       this.adsWanted = false;
     }
     this.root.visible = this.enabled;
@@ -509,9 +516,11 @@ export class Rifle {
       'secondary',
       'PointerSecondary',
     ) || Boolean(this.input?.buttonDown?.(2));
+    this.triggerBuffer = Math.max(0, this.triggerBuffer - dt);
+    if (this.input?.consumeButtonPressed?.(0) && !this.reloading) this.triggerBuffer = 0.12;
     if (inputADS !== this.adsWanted && this.input) this.setADS(inputADS);
     if (inputPressed(this.input, this._inputLatch, 'reload', 'reload', 'KeyR', 'r')) {
-      this.requestReload();
+      if (this.requestReload()) this.triggerBuffer = 0;
     }
 
     this._playerSnapshot = this.context?.state?.player
@@ -520,7 +529,8 @@ export class Rifle {
 
     if (this.reloading) {
       this._fixedReload(dt);
-    } else if ((this.triggerHeld || inputFire) && this.fireCooldown <= 0) {
+    } else if ((this.triggerHeld || inputFire || this.triggerBuffer > 0) && this.fireCooldown <= 0) {
+      this.triggerBuffer = 0;
       this._fire();
     }
     this._updateAimRay();
@@ -536,13 +546,15 @@ export class Rifle {
       ?? this.context?.state?.playerSnapshot
       ?? this._playerSnapshot;
     const sprinting = this._moveState === 'sprint' || Boolean(player?.sprinting);
-    const canSprintPose = sprinting && !this.adsWanted && !this.reloading && !this.triggerHeld;
+    const canSprintPose = sprinting && !this.adsWanted && !this.reloading
+      && !this.triggerHeld && !this.input?.buttonDown?.(0) && this._firePose < 0.1;
     this.sprint = damp(this.sprint, canSprintPose ? 1 : 0, 11, dt);
     this.ads = damp(this.ads, this.adsWanted && !this.reloading ? 1 : 0, 16, dt);
 
     const speed = Number(player?.speed) || 0;
     const moving = clamp01(speed / 4.25);
     const bobRate = sprinting ? 12 : 8.3;
+    const motionScale = this.context?.state?.controls?.reducedMotion ? 0.2 : 1;
     const bobX = Math.sin(this._time * bobRate) * 0.0085 * moving * (1 - this.ads * 0.86);
     const bobY = Math.sin(this._time * bobRate * 2) * 0.006 * moving * (1 - this.ads * 0.9);
     const idleX = Math.sin(this._time * 1.37) * 0.0032 * (1 - this.ads * 0.72);
@@ -555,8 +567,8 @@ export class Rifle {
       POSE_QUATERNION.slerp(SPRINT_QUATERNION, this.sprint);
     }
 
-    POSE_POSITION.x += bobX + idleX;
-    POSE_POSITION.y += bobY + idleY - this.visualRecoil * 0.016;
+    POSE_POSITION.x += (bobX + idleX) * motionScale;
+    POSE_POSITION.y += (bobY + idleY) * motionScale - this.visualRecoil * 0.016;
     POSE_POSITION.z += this.visualRecoil * 0.062;
     const exactCaptureADS = this.ads === 1
       && this.context?.state?.phase === 'capture';
@@ -799,9 +811,9 @@ export class Rifle {
 
   _buildModel() {
     this._modelBuilt = true;
-    const metalMap = makeTexture([78, 85, 87], 22, 'weapon-metal');
+    const metalMap = makeTexture([52, 57, 61], 13, 'weapon-metal');
     const metalRough = makeTexture([112, 112, 112], 48, 'weapon-metal-r', true);
-    const polymerMap = makeTexture([67, 76, 68], 18, 'weapon-polymer');
+    const polymerMap = makeTexture([57, 62, 62], 10, 'weapon-polymer');
     const polymerRough = makeTexture([172, 172, 172], 34, 'weapon-polymer-r', true);
     const gloveMap = makeTexture([73, 84, 70], 24, 'weapon-glove');
     const gloveRough = makeTexture([205, 205, 205], 26, 'weapon-glove-r', true);
@@ -811,8 +823,8 @@ export class Rifle {
       map: metalMap,
       roughnessMap: metalRough,
       roughness: 0.39,
-      metalness: 0.42,
-      clearcoat: 0.2,
+      metalness: 0.61,
+      clearcoat: 0.12,
       clearcoatRoughness: 0.38,
     });
     const darkMetal = new THREE.MeshPhysicalMaterial({
@@ -823,12 +835,12 @@ export class Rifle {
       clearcoatRoughness: 0.4,
     });
     const exposedMetal = new THREE.MeshStandardMaterial({
-      color: 0xb1b3aa,
+      color: 0x9a9d9c,
       roughness: 0.3,
       metalness: 0.82,
     });
     const railMetal = new THREE.MeshStandardMaterial({
-      color: 0x737a77,
+      color: 0x51575a,
       roughness: 0.34,
       metalness: 0.72,
     });
@@ -881,8 +893,9 @@ export class Rifle {
       metalness: 0,
     });
     const sleeve = new THREE.MeshStandardMaterial({
-      color: 0x3f4c41,
-      roughness: 0.96,
+      color: 0x323639,
+      map: gloveMap,
+      roughness: 0.92,
       metalness: 0,
     });
     this._materials.push(
@@ -1390,10 +1403,10 @@ export class Rifle {
     );
     const rightSleeve = cylinderPart(
       rightArm,
-      0.03,
-      0.038,
-      0.13,
-      new THREE.Vector3(0.071, -0.164, 0.012),
+      0.042,
+      0.052,
+      0.31,
+      new THREE.Vector3(0.096, -0.194, 0.124),
       sleeve,
       20,
       'right-tapered-forearm',
@@ -1401,7 +1414,7 @@ export class Rifle {
     this.rightSleeve = rightSleeve;
     rightSleeve.quaternion.setFromUnitVectors(
       new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(-0.58, 0.76, 0.29).normalize(),
+      new THREE.Vector3(-0.078, 0.098, -0.085).normalize(),
     );
 
     // Middle, ring and little fingers curl around the grip in two joints.
@@ -1475,10 +1488,10 @@ export class Rifle {
     );
     const leftSleeve = cylinderPart(
       this.leftHand,
-      0.03,
-      0.038,
-      0.13,
-      new THREE.Vector3(-0.083, -0.171, 0.008),
+      0.04,
+      0.049,
+      0.29,
+      new THREE.Vector3(-0.088, -0.198, 0.131),
       sleeve,
       20,
       'left-tapered-forearm',
@@ -1486,7 +1499,7 @@ export class Rifle {
     this.leftSleeveMesh = leftSleeve;
     leftSleeve.quaternion.setFromUnitVectors(
       new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0.55, 0.78, 0.29).normalize(),
+      new THREE.Vector3(0.054, 0.092, -0.097).normalize(),
     );
 
     // Four separated support fingers form a C-clamp around the rail. Their
@@ -1558,6 +1571,7 @@ export class Rifle {
     this.dryCooldown = 0;
     this.shotIndex = 0;
     this.recoilBloom = 0;
+    this.triggerBuffer = 0;
     this.visualRecoil = 0;
     this._firePose = 0;
     this._time = 0;

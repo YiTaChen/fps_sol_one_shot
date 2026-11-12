@@ -1,84 +1,27 @@
 import * as THREE from "three";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
-import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { resolveQuality } from "../core/Quality.js";
+import { createAshField } from "./AshField.js";
+import { createAshSky, createSkyEnvironment, HAZE_COLOR, SUN_DIRECTION } from "./AshSky.js";
+import { createDistrictScenery } from "./DistrictScenery.js";
 
 const _viewport = new THREE.Vector2();
 
-function createSky() {
-  const geometry = new THREE.SphereGeometry(190, 32, 18);
-  const material = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    fog: false,
-    uniforms: {
-      topColor: { value: new THREE.Color(0x3f6f89) },
-      horizonColor: { value: new THREE.Color(0xd2b58b) },
-      groundColor: { value: new THREE.Color(0x6d665a) },
-      sunDirection: {
-        value: new THREE.Vector3(-0.42, 0.69, -0.58).normalize(),
-      },
-      sunColor: { value: new THREE.Color(0xffe6b6) },
-    },
-    vertexShader: `
-      varying vec3 vWorldDirection;
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldDirection = normalize(worldPosition.xyz - cameraPosition);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        gl_Position.z = gl_Position.w;
-      }
-    `,
-    fragmentShader: `
-      precision highp float;
-      varying vec3 vWorldDirection;
-      uniform vec3 topColor;
-      uniform vec3 horizonColor;
-      uniform vec3 groundColor;
-      uniform vec3 sunDirection;
-      uniform vec3 sunColor;
-      void main() {
-        vec3 direction = normalize(vWorldDirection);
-        float up = direction.y;
-        float horizon = pow(1.0 - abs(up), 4.0);
-        vec3 base = mix(groundColor, topColor, smoothstep(-0.12, 0.82, up));
-        base = mix(base, horizonColor, horizon * 0.72);
-        float sun = pow(max(dot(direction, sunDirection), 0.0), 1100.0);
-        float halo = pow(max(dot(direction, sunDirection), 0.0), 24.0);
-        base += sunColor * (sun * 2.4 + halo * 0.14);
-        float haze = smoothstep(-0.06, 0.14, up) * (1.0 - smoothstep(0.14, 0.6, up));
-        base += vec3(0.12, 0.09, 0.055) * haze;
-        gl_FragColor = vec4(base, 1.0);
-      }
-    `,
-  });
-  const sky = new THREE.Mesh(geometry, material);
-  sky.name = "AtmosphericSky";
-  sky.frustumCulled = false;
-  sky.renderOrder = -1000;
-  return sky;
-}
+class ContactShadowPass extends SSAOPass {
+  setSize(width, height) {
+    super.setSize(Math.max(1, Math.floor(width * 0.55)), Math.max(1, Math.floor(height * 0.55)));
+  }
 
-function createSunLens() {
-  const group = new THREE.Group();
-  group.name = "DistantSun";
-  const sunMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffe8bd,
-    fog: false,
-    toneMapped: false,
-    transparent: true,
-    opacity: 0.88,
-    depthWrite: false,
-  });
-  const sun = new THREE.Mesh(new THREE.CircleGeometry(2.2, 32), sunMaterial);
-  sun.position.set(-63, 96, -88);
-  sun.lookAt(0, 0, 0);
-  group.add(sun);
-  return group;
+  render(renderer, writeBuffer, readBuffer) {
+    const uniforms = this.ssaoMaterial.uniforms;
+    uniforms.cameraProjectionMatrix.value.copy(this.camera.projectionMatrix);
+    uniforms.cameraInverseProjectionMatrix.value.copy(this.camera.projectionMatrixInverse);
+    super.render(renderer, writeBuffer, readBuffer);
+  }
 }
 
 export class RendererSystem {
@@ -107,7 +50,7 @@ export class RendererSystem {
     }
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 1.06;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.autoClear = false;
@@ -124,72 +67,77 @@ export class RendererSystem {
   }
 
   installAtmosphere() {
-    this.scene.background = new THREE.Color(0x8aa4a8);
-    this.scene.fog = new THREE.FogExp2(0x9caaa3, 0.0108);
-    this.sky = createSky();
+    this.scene.background = new THREE.Color(HAZE_COLOR);
+    this.scene.fog = new THREE.FogExp2(HAZE_COLOR, 0.0122);
+    this.sky = createAshSky();
+    this.environment = createSkyEnvironment(this.renderer, this.sky);
+    this.scene.environment = this.environment.texture;
+    this.scene.environmentIntensity = 0.61;
+    this.viewScene.environment = this.environment.texture;
+    this.viewScene.environmentIntensity = 0.68;
     this.scene.add(this.sky);
-    this.sunLens = createSunLens();
-    this.scene.add(this.sunLens);
+    this.ash = createAshField();
+    this.motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    this.scene.add(this.ash);
+    const { group, roadWear } = createDistrictScenery();
+    this.scene.add(group);
+    this.roadWear = roadWear;
 
-    this.hemi = new THREE.HemisphereLight(0xcfe3e8, 0x75624d, 2.15);
-    this.hemi.name = "SkyFill";
-    this.scene.add(this.hemi);
+    const skyFill = new THREE.HemisphereLight(0xd6e8ff, 0x8c7167, 1.42);
+    skyFill.name = "Overcast sky bounce";
+    this.scene.add(skyFill);
 
-    this.sun = new THREE.DirectionalLight(0xffdfad, 2.75);
-    this.sun.name = "SunKey";
-    this.sun.position.set(-38, 52, 31);
-    this.sun.target.position.set(4, 0, -8);
+    this.sun = new THREE.DirectionalLight(0xffcd99, 2.46);
+    this.sun.name = "Low sun through the ash";
+    this.sun.position.copy(SUN_DIRECTION).multiplyScalar(82);
     this.sun.castShadow = true;
-    this.sun.shadow.camera.left = -58;
-    this.sun.shadow.camera.right = 58;
-    this.sun.shadow.camera.top = 58;
-    this.sun.shadow.camera.bottom = -58;
-    this.sun.shadow.camera.near = 3;
-    this.sun.shadow.camera.far = 130;
-    this.sun.shadow.bias = -0.00014;
-    this.sun.shadow.normalBias = 0.025;
+    this.sun.shadow.camera.left = -53;
+    this.sun.shadow.camera.right = 53;
+    this.sun.shadow.camera.top = 53;
+    this.sun.shadow.camera.bottom = -53;
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 157;
+    this.sun.shadow.bias = -0.00017;
+    this.sun.shadow.normalBias = 0.032;
     this.scene.add(this.sun, this.sun.target);
 
-    this.warmBounce = new THREE.DirectionalLight(0xe6a76f, 0.62);
-    this.warmBounce.position.set(31, 12, -24);
-    this.scene.add(this.warmBounce);
+    const cloudFill = new THREE.DirectionalLight(0xabc9ed, 0.41);
+    cloudFill.position.set(-34, 28, 14);
+    this.scene.add(cloudFill);
 
-    this.coolFill = new THREE.DirectionalLight(0x9ccfe0, 0.72);
-    this.coolFill.position.set(-20, 18, -25);
-    this.scene.add(this.coolFill);
-
-    const viewKey = new THREE.DirectionalLight(0xffe4c4, 4.6);
+    const viewKey = new THREE.DirectionalLight(0xffdeb1, 2.9);
     viewKey.position.set(-2.4, 3.6, 4.2);
-    const viewFill = new THREE.HemisphereLight(0xd8edf2, 0x78614d, 2.35);
-    const viewRim = new THREE.DirectionalLight(0x8fcfe6, 2.1);
+    const viewFill = new THREE.HemisphereLight(0xd2e4ff, 0x816c62, 1.62);
+    const viewRim = new THREE.DirectionalLight(0xb0cdff, 2.45);
     viewRim.position.set(3.2, 1.4, -2.8);
-    const viewBounce = new THREE.DirectionalLight(0xf0a86c, 1.15);
+    const viewBounce = new THREE.DirectionalLight(0xe0a47f, 0.72);
     viewBounce.position.set(2.2, -1.1, 2.6);
-    const viewAmbient = new THREE.AmbientLight(0x8a9695, 0.78);
+    const viewAmbient = new THREE.AmbientLight(0x9da9b2, 0.40);
     this.viewScene.add(viewKey, viewFill, viewRim, viewBounce, viewAmbient);
   }
 
   installPostProcessing() {
     this.composer = new EffectComposer(this.renderer);
     this.renderPass = new RenderPass(this.scene, this.camera);
-    this.ssaoPass = new SSAOPass(this.scene, this.camera, 1280, 720);
-    this.ssaoPass.kernelRadius = 7;
-    this.ssaoPass.minDistance = 0.002;
-    this.ssaoPass.maxDistance = 0.085;
+    this.ssaoPass = new ContactShadowPass(this.scene, this.camera, 720, 405);
+    this.ssaoPass.kernelRadius = 5;
+    this.ssaoPass.minDistance = 0.0015;
+    this.ssaoPass.maxDistance = 0.055;
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(1280, 720),
-      0.095,
-      0.28,
-      0.88,
+      0.165,
+      0.38,
+      1.06,
     );
     this.colorGradePass = new ShaderPass({
       name: "CinderlineColorGrade",
       uniforms: {
         tDiffuse: { value: null },
-        saturation: { value: 1.055 },
-        contrast: { value: 1.035 },
-        shadowTint: { value: new THREE.Color(0x91afb1) },
-        highlightTint: { value: new THREE.Color(0xffd5a3) },
+        pixelStep: { value: new THREE.Vector2() },
+        saturation: { value: 0.89 },
+        contrast: { value: 1.06 },
+        shadowTint: { value: new THREE.Color(0xa5bfed) },
+        highlightTint: { value: new THREE.Color(0xffe0bc) },
       },
       vertexShader: `
         varying vec2 vUv;
@@ -202,29 +150,57 @@ export class RendererSystem {
         precision highp float;
         varying vec2 vUv;
         uniform sampler2D tDiffuse;
+        uniform vec2 pixelStep;
         uniform float saturation;
         uniform float contrast;
         uniform vec3 shadowTint;
         uniform vec3 highlightTint;
+
+        const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+
+        vec3 resolveEdge(vec3 center) {
+          float middle = dot(center, luma);
+          float nw = dot(texture2D(tDiffuse, vUv + pixelStep * vec2(-1,  1)).rgb, luma);
+          float ne = dot(texture2D(tDiffuse, vUv + pixelStep * vec2( 1,  1)).rgb, luma);
+          float sw = dot(texture2D(tDiffuse, vUv + pixelStep * vec2(-1, -1)).rgb, luma);
+          float se = dot(texture2D(tDiffuse, vUv + pixelStep * vec2( 1, -1)).rgb, luma);
+          float darkest = min(middle, min(min(nw, ne), min(sw, se)));
+          float brightest = max(middle, max(max(nw, ne), max(sw, se)));
+          if (brightest - darkest < max(0.018, brightest * 0.13)) return center;
+
+          vec2 tangent = vec2(sw + se - nw - ne, nw + sw - ne - se);
+          float strength = min(abs(tangent.x), abs(tangent.y)) + max(0.005, brightest * 0.12);
+          tangent = clamp(tangent / strength, -5.0, 5.0) * pixelStep;
+          vec3 local = (texture2D(tDiffuse, vUv - tangent / 6.0).rgb
+            + texture2D(tDiffuse, vUv + tangent / 6.0).rgb) * 0.5;
+          vec3 extended = local * 0.5 + (texture2D(tDiffuse, vUv - tangent * 0.5).rgb
+            + texture2D(tDiffuse, vUv + tangent * 0.5).rgb) * 0.25;
+          float extendedLuma = dot(extended, luma);
+          return extendedLuma < darkest || extendedLuma > brightest ? local : extended;
+        }
+
         void main() {
           vec4 source = texture2D(tDiffuse, vUv);
-          float luminance = dot(source.rgb, vec3(0.2126, 0.7152, 0.0722));
-          vec3 graded = mix(vec3(luminance), source.rgb, saturation);
+          vec3 filtered = resolveEdge(source.rgb);
+          float luminance = dot(filtered, luma);
+          vec3 graded = mix(vec3(luminance), filtered, saturation);
           graded = (graded - 0.18) * contrast + 0.18;
           float shadowWeight = 1.0 - smoothstep(0.08, 0.52, luminance);
           float highlightWeight = smoothstep(0.5, 0.94, luminance);
-          graded *= mix(vec3(1.0), shadowTint, shadowWeight * 0.055);
-          graded *= mix(vec3(1.0), highlightTint, highlightWeight * 0.045);
-          gl_FragColor = vec4(max(graded, vec3(0.0)), source.a);
+          graded *= mix(vec3(1.0), shadowTint, shadowWeight * 0.105);
+          graded *= mix(vec3(1.0), highlightTint, highlightWeight * 0.06);
+          vec2 position = (vUv - 0.5) * vec2(1.0, 0.78);
+          float edge = smoothstep(0.33, 0.65, length(position));
+          gl_FragColor = vec4(max(graded * (1.0 - edge * 0.115), vec3(0.0)), source.a);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
         }
       `,
     });
-    this.outputPass = new OutputPass();
     this.composer.addPass(this.renderPass);
     this.composer.addPass(this.ssaoPass);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(this.colorGradePass);
-    this.composer.addPass(this.outputPass);
   }
 
   applyQuality(name) {
@@ -233,15 +209,16 @@ export class RendererSystem {
       Math.min(window.devicePixelRatio || 1, this.quality.dpr),
     );
     this.renderer.shadowMap.enabled = this.quality.shadows;
-    this.ssaoPass.enabled = this.quality.name !== "low";
+    this.ssaoPass.enabled = this.quality.name === "high";
     this.bloomPass.enabled = this.quality.name !== "low";
-    this.ssaoPass.kernelRadius = this.quality.name === "high" ? 7 : 5;
-    this.bloomPass.strength = this.quality.name === "high" ? 0.095 : 0.065;
-    this.sun.shadow.mapSize.set(
-      this.quality.shadowMap,
-      this.quality.shadowMap,
-    );
-    this.scene.fog.density = 1.18 / this.quality.fogFar;
+    this.bloomPass.strength = this.quality.name === "high" ? 0.165 : 0.11;
+    const { shadowMap, fogFar } = this.quality;
+    if (this.sun.shadow.mapSize.x !== shadowMap) {
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+      this.sun.shadow.mapSize.set(shadowMap, shadowMap);
+    }
+    this.scene.fog.density = Math.max(0.0125, 1.2 / fogFar);
     this.resize();
     return this.quality;
   }
@@ -259,11 +236,15 @@ export class RendererSystem {
     this.viewCamera.updateProjectionMatrix();
     this.renderer.getDrawingBufferSize(_viewport);
     this.composer.setSize(safeWidth, safeHeight);
+    const { width: sceneWidth, height: sceneHeight } = this.composer.readBuffer;
+    this.colorGradePass.uniforms.pixelStep.value.set(1 / sceneWidth, 1 / sceneHeight);
+    this.ash.material.uniforms.pixelScale.value = Math.max(0.72, sceneHeight / 720);
     return { width: _viewport.x, height: _viewport.y };
   }
 
-  render() {
+  render(deltaSeconds = 0) {
     this.sky.position.copy(this.camera.position);
+    if (!this.motionPreference.matches) this.ash.material.uniforms.clock.value += deltaSeconds;
     this.renderer.setRenderTarget(null);
     this.composer.render();
     this.renderer.clearDepth();
@@ -294,11 +275,12 @@ export class RendererSystem {
           : [];
       for (const material of materials) material.dispose();
     });
+    this.roadWear.dispose();
+    this.environment.dispose();
     this.composer.dispose();
     this.ssaoPass.dispose();
     this.bloomPass.dispose();
     this.colorGradePass.dispose();
-    this.outputPass.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

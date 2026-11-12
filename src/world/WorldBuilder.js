@@ -7,6 +7,7 @@ import {
 } from './ArchitectureKit.js';
 import { GeometryKit, InstanceBatcher, createBeveledMesh } from './geometry/GeometryKit.js';
 import { PROP_ARCHETYPES, PropFactory } from './PropFactory.js';
+import { DistrictRoute } from './DistrictRoute.js';
 import {
   addCoverPoint,
   createBoxCollider,
@@ -25,6 +26,7 @@ const BUILDING_SPECS = Object.freeze([
     stories: 2,
     family: 'marketArcade',
     enterable: true,
+    rearPassage: { x: -2.25, width: 2.45 },
     variant: 0,
   },
   {
@@ -58,6 +60,8 @@ const BUILDING_SPECS = Object.freeze([
     stories: 2,
     family: 'brickWarehouse',
     enterable: true,
+    rearPassage: { x: 3.8, width: 3.2 },
+    freightEntry: true,
     variant: 3,
   },
   {
@@ -215,7 +219,7 @@ const INTERIOR_RECIPES = Object.freeze({
     ['display-shelf', -4.8, -3.9, Math.PI * 0.5, 0.82],
     ['display-shelf', 4.8, -3.9, -Math.PI * 0.5, 0.82],
     ['market-table', 0.8, -2.2, 0, 0.9],
-    ['produce-crate', -1.8, -4.8, 0.2, 0.85],
+    ['produce-crate', -0.15, -4.8, 0.2, 0.85],
     ['produce-basket', 1.8, -4.6, -0.2, 0.85],
     ['sack-stack', 4.1, 1.8, Math.PI * 0.5, 0.8],
     ['stool', -1.1, 1.5, 0, 0.85],
@@ -237,9 +241,13 @@ const INTERIOR_RECIPES = Object.freeze({
     ['shipping-crate', -5.7, -4.8, 0.1, 0.9],
     ['shipping-crate', -4.3, -4.7, -0.1, 0.82],
     ['oil-barrel', 5.8, -5.3, 0, 0.88],
-    ['fabric-bale', 4.4, -5.2, 0.2, 0.92],
+    ['fabric-bale', 1.55, -5.2, 0.2, 0.92],
     ['pipe-rack', 6.9, 0.7, Math.PI * 0.5, 0.82],
     ['cable-spool', -6.5, 1.5, 0.1, 0.9],
+    ['tool-cabinet', -8.65, -5.9, Math.PI * 0.5, 0.92],
+    ['workbench', -8.4, 3.55, Math.PI * 0.5, 0.93],
+    ['electrical-cabinet', 7.85, 4.45, -Math.PI * 0.5, 0.95],
+    ['drum-cart', 7.95, -5.6, Math.PI * 0.25, 0.85],
   ],
   'lantern-cafe': [
     ['market-table', -3.5, -3.8, 0, 0.72],
@@ -328,6 +336,7 @@ export class WorldBuilder {
     this.physicsCoverRecords = [];
     this.surfaceZones = [];
     this.interiorLights = [];
+    this.districtRoute = null;
     this.worldData = null;
   }
 
@@ -390,6 +399,7 @@ export class WorldBuilder {
     this.placeHeroProps();
     this.placeRepeatedStreetDressing(dressingRng);
     this.scatterInstancedDetails(dressingRng);
+    this.districtRoute = new DistrictRoute(this);
     this.batcher.flush();
     this.registerPhysics(context.physics);
     context.scene.add(this.root);
@@ -432,6 +442,9 @@ export class WorldBuilder {
       enemySpawns,
       colliders: this.colliders,
       coverPoints: this.coverPoints,
+      route: this.districtRoute.relays,
+      extraction: this.districtRoute.extraction,
+      setRouteStatus: (activeId, completedIds) => this.districtRoute.setStatus(activeId, completedIds),
       materialAt,
       capturePoses,
       stats,
@@ -733,8 +746,9 @@ export class WorldBuilder {
   addInteriorPartition(building, layoutRng) {
     const { spec, group, family } = building;
     const partitionZ = -spec.depth * 0.12;
-    const doorWidth = 1.4;
-    const gapX = layoutRng.range(-spec.width * 0.18, spec.width * 0.18);
+    const randomGap = layoutRng.range(-spec.width * 0.18, spec.width * 0.18);
+    const doorWidth = spec.rearPassage?.width ?? 1.4;
+    const gapX = spec.rearPassage?.x ?? randomGap;
     building.interior.partitionGapX = gapX;
     const leftWidth = gapX - doorWidth * 0.5 + spec.width * 0.5 - 0.42;
     const rightStart = gapX + doorWidth * 0.5;
@@ -801,6 +815,8 @@ export class WorldBuilder {
       if (building.spec.id === 'saffron-arcade') {
         this.dressSaffronArcade(building, dressingRng);
       }
+      const isKiln = building.spec.id === 'kiln-house';
+      if (isKiln) this.dressKilnHouse(building.spec);
 
       for (let lightIndex = -1; lightIndex <= 1; lightIndex += 2) {
         localToWorld(
@@ -809,7 +825,7 @@ export class WorldBuilder {
           building.spec.yaw,
           _position,
         );
-        const lamp = new THREE.PointLight(0xffb45d, 25, 8.5, 1.65);
+        const lamp = new THREE.PointLight(isKiln ? 0xc4e9f1 : 0xffb45d, 25, 8.5, 1.65);
         lamp.position.copy(_position);
         lamp.name = `interior-light:${building.spec.id}:${lightIndex}`;
         lamp.castShadow = false;
@@ -822,6 +838,28 @@ export class WorldBuilder {
           _quaternion.identity(),
           _scale.set(0.38, 0.08, 0.22),
           { name: 'interior-luminaire', receiveShadow: false },
+        );
+      }
+    }
+  }
+
+  dressKilnHouse(spec) {
+    for (const z of [-6.45, 1.5, 5.9]) {
+      this.architecture.addInstance(
+        spec, 'rustedMetal',
+        _size.set(20.45, 0.22, 0.2), _local.set(0, 2.92, z),
+        { module: 'roof-screen' },
+      );
+      for (const x of [-6.65, 5.8]) {
+        this.architecture.addInstance(
+          spec, 'paintedMetal',
+          _size.set(2.25, 0.13, 0.39), _local.set(x, 2.78, z),
+          { module: 'wall-lamp', receiveShadow: false },
+        );
+        this.architecture.addInstance(
+          spec, 'lamp',
+          _size.set(1.96, 0.047, 0.19), _local.set(x, 2.71, z),
+          { module: 'wall-lamp', receiveShadow: false },
         );
       }
     }
@@ -999,27 +1037,42 @@ export class WorldBuilder {
         },
       );
     }
+    const rackCenter = -6.25;
+    const rackDepth = 3.92;
+    for (const x of [rackCenter - 0.73, rackCenter + 0.73]) {
+      addBox('bareMetal', [0.065, 1.72, 0.48], [x, 0.89, rackDepth], { radius: 0.012 });
+    }
+    addBox('wood', [1.48, 1.69, 0.055], [rackCenter, 0.88, rackDepth - 0.22]);
     for (let shelf = 0; shelf < 3; shelf += 1) {
+      const shelfTop = 0.42 + shelf * 0.52;
+      addBox('wood', [1.42, 0.07, 0.49], [rackCenter, shelfTop - 0.035, rackDepth]);
       for (let item = 0; item < 4; item += 1) {
-        const x = -5.05 + item * 0.32;
-        const y = 0.54 + shelf * 0.52;
+        const x = rackCenter - 0.48 + item * 0.32;
+        const bottleHeight = 0.22 + (item % 2) * 0.04;
         if ((shelf + item) % 2 === 0) {
           addVessel(
             item % 3 === 0 ? 'ceramic' : 'plasterBlue',
-            [0.14, 0.22 + (item % 2) * 0.04, 0.14],
-            [x, y, 3.92],
+            [0.14, bottleHeight, 0.14],
+            [x, shelfTop + bottleHeight * 0.5, rackDepth],
             { variant: shelf + item },
           );
         } else {
           addSoftBundle(
             item % 3 === 0 ? 'foliage' : 'fabric',
             [0.18, 0.17, 0.19],
-            [x, y, 3.92],
+            [x, shelfTop + 0.073, rackDepth],
             { variant: shelf * 4 + item },
           );
         }
       }
     }
+    this.colliders.push(createBoxCollider({
+      id: 'saffron-west-rack',
+      center: new THREE.Vector3(spec.position.x + rackCenter, 0.89, spec.position.z + rackDepth),
+      size: new THREE.Vector3(1.52, 1.72, 0.5),
+      material: 'wood',
+      tags: ['interior', 'prop'],
+    }));
     addBox('wood', [3.25, 0.7, 0.08], [3.15, 1.82, -1.78], {
       module: 'fascia-sign',
     });
@@ -1041,8 +1094,8 @@ export class WorldBuilder {
     });
 
     // A secondary timber ceiling lattice, utility rail and pendant fixtures
-    // reveal actual construction depth beneath the tiled upper-floor slab.
-    for (const z of [-0.75, 1.1, 2.95, 4.8, 6.35]) {
+    // reveal construction depth on both sides of the arcade partition.
+    for (const z of [-6.3, -4.4, -2.5, -0.75, 1.1, 2.95, 4.8, 6.35]) {
       addBox('wood', [14.7, 0.11, 0.16], [0, 2.91, z], {
         module: 'roof-screen',
       });
@@ -1052,7 +1105,7 @@ export class WorldBuilder {
         module: 'roof-screen',
       });
     }
-    for (const [x, z] of [[-1.8, 2.2], [2.4, 1.2], [4.85, 4.25]]) {
+    for (const [x, z] of [[-4.5, -5.9], [2.9, -4.4], [-1.8, 2.2], [2.4, 1.2], [4.85, 4.25]]) {
       addCylinder('bareMetal', [0.028, 0.62, 0.028], [x, 2.58, z], {
         radialSegments: 6,
         module: 'wall-lamp',
@@ -1145,6 +1198,8 @@ export class WorldBuilder {
       ['oil-barrel', -28, -4.2, 0],
       ['dumpster', -2, 27.6, Math.PI],
       ['pallet', 38, -27.8, 0],
+      ['shipping-crate', 8.9, -31.9, -0.08],
+      ['shipping-crate', 24, -26.55, 0.1],
     ];
     for (const [type, x, z, yaw] of coverPlacements) {
       this.props.place(type, new THREE.Vector3(x, 0.02, z), yaw, rng.range(0.9, 1.04));
@@ -1363,6 +1418,7 @@ export class WorldBuilder {
     this.physicsCoverRecords.length = 0;
 
     this.root.removeFromParent();
+    this.districtRoute?.dispose();
     this.batcher?.dispose();
     this.geometryKit?.dispose();
     if (this.ownsMaterials) {
@@ -1375,6 +1431,7 @@ export class WorldBuilder {
     this.coverPoints.length = 0;
     this.surfaceZones.length = 0;
     this.interiorLights.length = 0;
+    this.districtRoute = null;
     this.root = null;
     this.context = null;
     this.materials = null;

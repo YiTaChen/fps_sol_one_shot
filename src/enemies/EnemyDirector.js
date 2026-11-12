@@ -389,6 +389,7 @@ export class EnemyDirector {
     if (!toVector3(safeSource, this.safeCenter)) this.safeCenter.set(-44, 0, 1.2);
     this.spawnedCount = 0;
     this.reinforcementTimer = 0;
+    this.placements = config.placements ?? null;
 
     while (this.enemies.length) {
       const enemy = this.enemies.pop();
@@ -537,6 +538,13 @@ export class EnemyDirector {
   }
 
   _chooseSpawn(stream, id, reinforcement) {
+    const placement = !reinforcement && this.placements?.[id];
+    if (placement) {
+      const authored = this._readSpawn(placement, id);
+      if (this._groundSpawn(authored.position, tmpSpawnPosition)) {
+        return { position: tmpSpawnPosition.clone(), yaw: authored.yaw };
+      }
+    }
     const sources = this.enemySpawns.length ? this.enemySpawns : DEFAULT_SPAWNS;
     const safeCenter = reinforcement && this._resolvePlayer()
       ? this._playerFootPosition
@@ -1282,14 +1290,14 @@ export class EnemyDirector {
     }
   }
 
-  forceAlert(position) {
+  forceAlert(position, radius = 38) {
     if (position && !toVector3(position, tmpPoint)) return;
     if (!position) tmpPoint.copy(this._playerPosition);
     for (let i = 0; i < this.enemies.length; i += 1) {
       const enemy = this.enemies[i];
       if (!enemy.alive) continue;
       const distanceSq = enemy.rig.root.position.distanceToSquared(tmpPoint);
-      if (distanceSq > 38 * 38) continue;
+      if (distanceSq > radius * radius) continue;
       enemy.lastHeard.copy(tmpPoint);
       enemy.lastHeardTime = this.time;
       if (!enemy.alerted) {

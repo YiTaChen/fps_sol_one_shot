@@ -1,9 +1,9 @@
 # Cinderline: One Shot
 
 An original, deterministic browser tactical FPS built with Three.js and WebGL2.
-Fight through a code-generated industrial market with projectile ballistics,
-reactive combat AI, advanced first-person movement, endless operations, and
-synthesized spatial audio.
+Restore three relays and extract from Ash Market, a code-generated industrial
+district with reactive patrols, advanced first-person movement, and synthesized
+spatial audio. Endless Sweep is available from the main menu.
 
 **▶ [Play online](https://fps-gpt56-one-shot.web.app)** · **[Run locally](#quick-start)** ·
 **[Explore the gameplay](#gameplay)** ·
@@ -13,11 +13,6 @@ synthesized spatial audio.
 <p align="center">
   <img src="artifacts/captures/07-active-combat.png" width="960" alt="High-quality active combat capture showing the rifle, enemy soldier, tactical HUD, muzzle effects, and code-generated industrial district">
   <br><sub><b>High-quality capture:</b> active combat rendered in the high quality preset.</sub>
-</p>
-
-<p align="center">
-  <img src="artifacts/demo/gameplay-preview.gif" width="720" alt="Gameplay preview showing movement, aiming, and combat in Ash Market">
-  <br><sub><b>Gameplay preview:</b> compressed for fast README loading; the capture above represents the rendered image quality.</sub>
 </p>
 
 The runtime downloads no models, textures, images, or audio samples. Buildings,
@@ -32,16 +27,25 @@ sound effects are all constructed from code.
 | **Engine** | Three.js `0.180.0`, WebGL2, Web Audio |
 | **World** | Authored Ash Market layout with deterministic procedural assembly and dressing |
 | **Simulation** | Fixed `1 / 60 s` gameplay step with isolated seeded RNG streams |
-| **Progression** | Endless operations with `7 × operation` total hostiles |
+| **Modes** | Relay Run and Endless Sweep with `7 × operation` total hostiles |
 | **Asset policy** | No downloaded models, textures, images, or audio samples at runtime |
-| **Validation** | 22/22 automated checks, 7 deterministic captures, zero recorded browser errors |
 
 ## Gameplay
 
-Deploy into Ash Market and neutralize every hostile before your health reaches
-zero. Operation 1 begins with seven soldiers. Clearing it unlocks the next
-operation on the same district with newly seeded enemy positions and a total
-enemy quota of:
+### Relay Run
+
+Choose **Deploy** to restore the relays in Saffron Arcade, North Service and
+Kiln House, then reach the marked Cross Street extraction post. The HUD shows
+the next location, distance and a route hint. Hold **F** at each station until
+the progress bar fills. Leaving the station, releasing the key, getting hit
+or pausing cancels the current hold. Activating a relay draws nearby patrols
+toward the station, so moving on and clearing enemies are both viable.
+
+### Endless Sweep
+
+Choose **Endless Sweep** to clear every enemy before your health reaches zero.
+Operation 1 starts with seven enemies. Clearing it unlocks the next operation
+on the same district with newly seeded positions and the following quota:
 
 ```text
 total hostiles = 7 × current operation
@@ -106,7 +110,9 @@ quality preset, SHA-256 hashes, combat state, and browser diagnostics.
 
 ## Controls
 
-Click **Deploy** first to enable pointer-lock aiming and browser audio.
+Click **Deploy** or **Endless Sweep** to enable pointer-lock aiming and browser
+audio. The start and pause menus provide mouse speed, aim speed and reduced
+camera sway settings, saved in the browser.
 
 | Input | Action |
 |---|---|
@@ -120,6 +126,7 @@ Click **Deploy** first to enable pointer-lock aiming and browser audio.
 | Sprint + `Ctrl` / `C` | Slide |
 | `Space` | Jump; mantle a valid ledge up to 0.44 m |
 | `Q` / `E` | Protected lean left / right |
+| Hold `F` | Operate the active relay or extract |
 | `Esc` | Release pointer lock and pause |
 | Menu buttons | Resume, restart, advance operation, or change quality |
 
@@ -127,7 +134,7 @@ Click **Deploy** first to enable pointer-lock aiming and browser audio.
 
 Requirements:
 
-- Node.js **20.19.0 or newer**
+- Node.js **22.23.4 or a later 22.x release**
 - npm
 - A desktop browser with JavaScript, WebGL2, pointer lock, keyboard, and mouse
 
@@ -156,7 +163,7 @@ npm run build
 npx vite preview
 ```
 
-The ES2022 build is written to `dist/`, includes source maps, and separates
+The ES2022 build is written to `dist/` and separates
 Three.js into its own chunk.
 
 ## AI-agent-assisted development
@@ -184,6 +191,10 @@ screenshots and diagnostics, add deterministic regression coverage, then commit
 and push before beginning the next stage. Git history records the milestones;
 exact agent token totals and complete wall-clock time are not encoded in the
 repository, so they are not estimated here.
+
+The November 2026 update uses the public Claude Fable 5.2 demo Saltline as a
+reference for lighting, composition, interaction feedback, and level pacing.
+See the [comparison and implementation review](artifacts/saltline-comparison.md).
 
 ## Architecture
 
@@ -225,11 +236,11 @@ material families. The full technical contract is in
 | Preset | Render scale | DPR cap | Shadow map | SSAO / bloom | Fog range |
 |---|---:|---:|---:|---|---:|
 | Low | 82% | 1.0 | 1024 | Off | 84 |
-| Medium | 100% | 1.25 | 1536 | On | 105 |
+| Medium | 100% | 1.25 | 1536 | Bloom | 105 |
 | High | 100% | 1.75 | 2048 | On, stronger bloom | 128 |
 
 Effect pools also respond to quality changes. Procedural material textures are
-128 px on Low and 256 px on Medium/High.
+128 px on Low and 256 px on Medium/High. Medium is the default for normal play.
 
 ## Validation and evidence
 
@@ -242,12 +253,13 @@ npm run profile
 
 | Evidence | Result |
 |---|---|
-| Production build | Vite build succeeds with 47 transformed modules |
-| Contract and browser suite | **22/22 passed in 267.35 s** |
+| Production build | Vite build |
+| Contract and browser suite | See the linked smoke report |
 | Enemy AI contract | 35° cone boundary, 2–4 s reaction, aim lag, mixed spread hits/misses |
 | Physics contract | 10 high-wall, low-step, ceiling, airborne, landing, and controller cases |
 | Progression contract | Hostile storage input, monotonic records, deterministic operation seeds |
-| Full gameplay loop | Real two-way combat, victory, Operation 2 with 14 total / 12 active, defeat, restart |
+| Full gameplay loop | Relay progress, interruption, extraction, replay, plus sweep victory, scaling, and defeat |
+| Input | Short-click buffering, same-step aim, pointer lock, movement, stance, and reload |
 | Browser diagnostics | Zero console errors, page errors, failed requests, or HTTP errors |
 | Capture set | 7 deterministic 1440×810 views with hashes and zero browser errors |
 
@@ -258,16 +270,16 @@ Evidence files:
 - [`artifacts/performance/moving-combat.json`](artifacts/performance/moving-combat.json)
 - [`artifacts/visual-review.md`](artifacts/visual-review.md)
 
-The recorded performance profile runs headless Chromium through SwiftShader
-software WebGL. It completed the full moving-combat workload but did **not**
-meet the 45 FPS target on that runner, so it is preserved as automation evidence
-rather than presented as representative hardware-GPU performance.
+The July moving-combat profile records the original SwiftShader run.
+See the comparison report for the hardware-GPU measurement conditions and
+the current build results.
 
 ### Reproducing selected evidence
 
 ```bash
 FPS_CAPTURE_VIEWS=wide-street,active-combat npm run capture
 FPS_BASE_URL=http://127.0.0.1:5173 npm test
+FPS_BROWSER_GPU=hardware npm test
 ```
 
 `FPS_CAPTURE_SEED`, `FPS_CAPTURE_DIR`, and the same `FPS_BASE_URL` override are
@@ -278,20 +290,18 @@ supported by the capture and profile scripts.
 
 - Desktop WebGL2 and pointer-lock controls are required; touch, gamepad, and
   accessibility-specific input modes are not implemented.
-- The game is single-player, single-map, and single-rifle. Operations scale on
-  the same authored district rather than adding new maps.
+- The game is single-player, single-map, and single-rifle. Both modes take place
+  in Ash Market.
 - Highest-operation persistence stores no sensitive data and is not tamper-proof
   against DevTools, extensions, or local browser-profile modification.
 - Browser audio starts only after a user gesture.
 - Live quality switching does not regenerate procedural material textures.
-- The visual review found a coherent procedural prototype, but not professional
-  military-FPS art quality. Remaining weaknesses include simplified forms,
-  mannequin-like anatomy and hand contact, repetitive surfaces, and a few
-  visibly floating props.
+- The July [visual review](artifacts/visual-review.md) documents the original
+  prototype. The November comparison covers the current art and its remaining gaps.
 - Capture hashes document generated outputs; they are not pixel-diff regression
   tests.
 - Vite assumes root-path hosting. Subpath deployment requires an appropriate
   `base` setting.
-- No license has been granted in this repository.
+- See [LICENSE](LICENSE) for license terms.
 
 </details>

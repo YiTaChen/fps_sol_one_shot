@@ -389,7 +389,7 @@ export class Effects {
     const tracerMaterial = new THREE.MeshBasicMaterial({
       color: 0xffc170,
       transparent: true,
-      opacity: 0.74,
+      opacity: 0.59,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       toneMapped: false,
@@ -537,17 +537,19 @@ export class Effects {
     const tracer = this._claimTimed(this.tracers, this.tracerLimit);
     tracer.active = true;
     tracer.age = 0;
-    tracer.life = kind === 'enemy' ? 0.18 : 0.105;
+    tracer.life = kind === 'enemy' ? 0.12 : 0.08;
     SEGMENT.subVectors(b, a);
-    const length = Math.min(kind === 'enemy' ? 45 : 22, SEGMENT.length());
+    const pathLength = SEGMENT.length();
+    const startOffset = Math.min(kind === 'enemy' ? 3.0 : 2.4, pathLength * 0.28);
+    const length = Math.min(kind === 'enemy' ? 14 : 10, pathLength - startOffset);
     if (length <= 0.001) {
       tracer.active = false;
       return false;
     }
     DIRECTION.copy(SEGMENT).normalize();
-    MIDPOINT.copy(a).addScaledVector(DIRECTION, length * 0.5);
+    MIDPOINT.copy(a).addScaledVector(DIRECTION, startOffset + length * 0.5);
     QUATERNION.setFromUnitVectors(Y_AXIS, DIRECTION);
-    SCALE.set(kind === 'enemy' ? 1.25 : 1, length, kind === 'enemy' ? 1.25 : 1);
+    SCALE.set(kind === 'enemy' ? 0.9 : 0.65, length, kind === 'enemy' ? 0.9 : 0.65);
     MATRIX.compose(MIDPOINT, QUATERNION, SCALE);
     this.tracerMesh.setMatrixAt(tracer.index, MATRIX);
     this.tracerMesh.instanceMatrix.needsUpdate = true;
