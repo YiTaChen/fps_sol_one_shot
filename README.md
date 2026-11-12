@@ -99,6 +99,11 @@ Switching weapons preserves the magazine and reserve of each firearm. Already
 owned weapons can be re-equipped in an armory at no charge. Carry up to two of
 each throwable and four total.
 
+The shoulder view shows the current equipment on the player model. A scoped
+weapon uses its optic while aiming, and the camera returns to the player's
+eyes if cover obstructs the shoulder camera. Press **T** to draw and throw
+the selected utility. A charge is spent when the orb leaves the hand.
+
 ## Feature highlights
 
 - **Tactical enemy perception** — soldiers detect only within a 35° half-angle,
@@ -166,6 +171,7 @@ camera sway settings, saved in the browser.
 | Hold `F` | Operate the active relay or extract |
 | `G` | Queue the decoy at the last powered station |
 | `B` | Open a secure armory locker |
+| `V` | Toggle first-person and shoulder view |
 | `1` / `2` / `3` | Primary / sidearm / melee |
 | `4` / `5` / `6` | Select Pulse / Haze / Stasis |
 | `T` | Throw the selected utility |

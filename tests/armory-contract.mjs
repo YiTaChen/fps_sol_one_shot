@@ -100,19 +100,37 @@ export async function runBrowserArmoryContract(page) {
       api.setInput({});
       await api.step(1);
     };
+    const patrols = game.enemies.enemies.map(({ weapon, rig }) => ({
+      active: weapon.id,
+      visible: rig.weaponId,
+      attachmentCount: rig.rifle.children.length,
+    }));
     await api.step(35);
+    await key({ KeyV: true }, 1);
+    const shoulder = game.shoulderCamera.active && game.playerAvatar.root.visible;
+    const observedPrecision = game.playerAvatar.weaponId;
     api.setInput({ ads: true });
     await api.step(35);
-    const aim = { weapon: api.snapshot().weapon, fov: game.rendering.camera.fov };
+    const aim = { weapon: api.snapshot().weapon, fov: game.rendering.camera.fov, optical: !game.shoulderCamera.active };
     await key({ ads: true, fire: true }, 95);
     const precisionAmmo = api.snapshot().weapon.magazine;
     await key({ Digit2: true }, 25);
+    let muzzleMatched = false;
+    const offSidearm = game.events.on('weapon:fire', (shot) => {
+      if (shot.kind === 'player' && shot.weaponId === 'sidearm') {
+        muzzleMatched = game.shoulderCamera.active
+          && shot.position.distanceTo(game.playerAvatar.muzzleWorld()) < 0.001;
+      }
+    });
     await key({ fire: true }, 30);
+    offSidearm();
     const sidearm = api.snapshot().weapon;
+    const observedSidearm = game.playerAvatar.weaponId;
     await key({ KeyR: true }, 78);
     await key({ Digit1: true }, 28);
     const preservedAmmo = api.snapshot().weapon.magazine;
     await key({ Digit3: true }, 22);
+    const observedMelee = game.playerAvatar.weaponId;
     let meleeEvents = 0;
     const off = game.events.on('weapon:melee', () => { meleeEvents += 1; });
     const enemy = game.enemies.enemies[0];
@@ -131,7 +149,12 @@ export async function runBrowserArmoryContract(page) {
     const blockedWhileThreatened = api.state().phase === 'playing';
     game.enemies.paused = false;
     await key({ Digit5: true, KeyT: true }, 1);
+    if (game.playerAvatar.weaponId !== 'haze' || api.state().economy.supplies.haze !== 1) {
+      throw new Error('Haze Orb did not appear in hand before release');
+    }
+    await api.step(13);
     const thrown = api.snapshot();
+    const restoredMelee = game.playerAvatar.weaponId;
     const [rewardTarget] = thrown.enemies.filter((entry) => entry.alive);
     await api.killEnemy(rewardTarget.id);
     const rewarded = api.state().economy;
@@ -139,11 +162,18 @@ export async function runBrowserArmoryContract(page) {
     await api.killEnemy(nextTarget.id);
     await key({ KeyB: true }, 1);
     const safeLockerReopened = api.state().phase === 'armory';
-    return { aim, precisionAmmo, sidearm, preservedAmmo, meleeEvents, closeHit, thrown, rewarded, blockedWhileThreatened, safeLockerReopened };
+    return { patrols, shoulder, observedPrecision, observedSidearm, observedMelee, restoredMelee, muzzleMatched,
+      aim, precisionAmmo, sidearm, preservedAmmo, meleeEvents, closeHit, thrown,
+      rewarded, blockedWhileThreatened, safeLockerReopened };
   });
 
+  assert.deepEqual(new Set(combat.patrols.map(({ active }) => active)), new Set(['vesper', 'smg', 'precision']));
+  assert(combat.patrols.every(({ active, visible, attachmentCount }) => active === visible && attachmentCount === 1));
+  assert(combat.shoulder, 'Shoulder view did not display the avatar');
+  assert.deepEqual([combat.observedPrecision, combat.observedSidearm, combat.observedMelee], ['precision', 'sidearm', 'melee']);
+  assert(combat.muzzleMatched, 'Sidearm flash did not originate from the visible weapon');
   assert.equal(combat.aim.weapon.id, 'precision');
-  assert(combat.aim.weapon.scoped && combat.aim.fov < 32, 'Precision scope did not zoom');
+  assert(combat.aim.weapon.scoped && combat.aim.optical && combat.aim.fov < 32, 'Precision scope did not zoom');
   assert.equal(combat.precisionAmmo, 4, 'Holding precision fire produced more than one shot');
   assert.equal(combat.sidearm.id, 'sidearm');
   assert.equal(combat.sidearm.magazine, 11, 'Sidearm trigger did not fire one shot');
@@ -153,7 +183,8 @@ export async function runBrowserArmoryContract(page) {
   assert(combat.blockedWhileThreatened && combat.safeLockerReopened,
     'The locker failed to enforce or release its nearby-threat restriction');
   assert.equal(combat.thrown.state.economy.supplies.haze, 0);
-  assert(combat.thrown.throwables.active.some((item) => item.id === 'haze' && item.phase === 'flight'),
+  assert.equal(combat.restoredMelee, 'melee');
+  assert(combat.thrown.throwables.active.some((item) => item.id === 'haze' && ['flight', 'field'].includes(item.phase)),
     'Purchased utility was consumed without a live throw');
   assert.equal(combat.rewarded.credits, 135);
   await show('armory').locator('[data-buy="reserve-case"]').click();

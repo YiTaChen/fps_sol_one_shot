@@ -331,12 +331,11 @@ export class Effects {
 
     listen(this.events, 'weapon:fire', (event) => {
       this.spawnMuzzle(event);
+      if (event?.kind === 'enemy' || String(event?.source ?? '').startsWith('enemy:')) return;
       const start = event?.muzzle ?? event?.position;
       const end = event?.tracerEnd;
       if (vectorLike(start) && vectorLike(end)) this.spawnTracer(start, end, 'player');
-      if (event?.kind !== 'enemy' && !String(event?.source ?? '').startsWith('enemy:')) {
-        this._spawnShellFromShot(event);
-      }
+      this._spawnShellFromShot(event);
     }, this._disposers);
     listen(this.events, 'projectile:spawn', (event) => {
       if (event?.kind !== 'enemy') return;

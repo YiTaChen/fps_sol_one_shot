@@ -16,6 +16,8 @@ import {
 import { MaterialLibrary } from "../materials/MaterialLibrary.js";
 import { PhysicsWorld } from "../physics/PhysicsWorld.js";
 import { PlayerController } from "../player/PlayerController.js";
+import { ShoulderCamera } from "../player/ShoulderCamera.js";
+import { createEnemySoldier } from "../enemies/EnemySoldier.js";
 import { RendererSystem } from "../rendering/RendererSystem.js";
 import { UI } from "../ui/UI.js";
 import { WEAPON_DEFINITIONS } from "../weapons/Arsenal.js";
@@ -70,9 +72,12 @@ const THROWABLE_IDS = Object.values(THROWABLE_KEYS);
 const ARMORY_RADIUS = 9;
 const FIELD_LOCKER_RADIUS = 3.2;
 const FIELD_LOCKER_THREAT_RADIUS = 10;
+const THROW_WINDUP = 0.18;
 const MENU_CAMERA_POSITION = new THREE.Vector3(-45.6, 2.35, 5.4);
 const MENU_CAMERA_TARGET = new THREE.Vector3(-42.5, 3.5, -6);
 const _damageDirection = new THREE.Vector3(0, 0, 1);
+const _throwPosition = new THREE.Vector3();
+const _avatarAim = new THREE.Vector3();
 const _capturePosition = new THREE.Vector3();
 const _captureTarget = new THREE.Vector3();
 const _captureDirection = new THREE.Vector3();
@@ -186,6 +191,7 @@ export class Game {
     this.state = {
       economy: this.economy.state,
       armoryAvailable: false,
+      shoulderView: false,
       equippedSlot: "primary",
       throwable: "pulse",
       phase: "menu",
@@ -296,6 +302,20 @@ export class Game {
       safeRadius: ENEMY_INITIAL_SAFE_RADIUS,
     });
     this.enemies.init(this.context);
+    this.playerAvatar = createEnemySoldier(-1, 0, this.enemies.sharedAssets);
+    this.playerAvatar.root.visible = false;
+    this.playerAvatar.setRenderDetail(true, false);
+    this.rendering.scene.add(this.playerAvatar.root);
+    this.throwView = new THREE.Group();
+    this.throwView.name = "utility-viewmodel";
+    this.throwView.visible = false;
+    this.rendering.viewScene.add(this.throwView);
+    this.pendingThrow = null;
+    this.shoulderCamera = new ShoulderCamera(this.rendering.camera, this.physics);
+    this.context.visualMuzzle = (out) => this.state.shoulderView && this.shoulderCamera.active
+      && !(this.rifle.options.scope && this.rifle.ads > 0.52)
+      && this.playerAvatar.weaponId === this.activeWeaponId
+      ? this.playerAvatar.muzzleWorld(out) : null;
     this.throwables = new Throwables(this.context, { enemies: this.enemies });
     this.enemies.visionOccluded = (from, to) => this.throwables.blocksVision(from, to);
     this.enemies.isStunned = (id) => this.throwables.isStunned(id);
@@ -389,7 +409,9 @@ export class Game {
   }
 
   returnToMenu() {
+    this.cancelThrow();
     this.state.phase = "menu";
+    this.state.shoulderView = false;
     this.state.mode = "sweep";
     this.state.mission = null;
     this.relayMission?.reset();
@@ -427,6 +449,7 @@ export class Game {
 
   applyPause() {
     if (this.state.phase !== "playing") return;
+    this.cancelThrow();
     this.state.phase = "paused";
     this.relayMission?.clearHold();
     this.player.setEnabled(false);
@@ -475,6 +498,7 @@ export class Game {
   }
 
   _resetRound({ deferPointerLock = false } = {}) {
+    this.cancelThrow();
     this.state.phase = "playing";
     this.state.kills = 0;
     this.state.elapsed = 0;
@@ -515,6 +539,7 @@ export class Game {
   selectWeapon(slot, animate = true) {
     const id = this.economy.state.equipped[slot];
     if (!id) return false;
+    this.cancelThrow();
     if (this.activeWeaponId !== id) {
       this.rifle.holster();
       let weapon = this.weaponInstances.get(id);
@@ -530,6 +555,7 @@ export class Game {
       this.events.emit("weapon:changed", { id, slot });
     }
     this.state.equippedSlot = slot;
+    this.playerAvatar?.setWeapon(id);
     if (this.state.phase === "playing") {
       if (animate) this.rifle.equip();
       else this.rifle.setEnabled(true);
@@ -557,6 +583,7 @@ export class Game {
       this.events.emit("ui:announce", { text: "Armory requires a secure locker", tone: "warning", duration: 1.6 });
       return false;
     }
+    this.cancelThrow();
     this.state.phase = "armory";
     this.relayMission?.clearHold();
     this.player.setEnabled(false);
@@ -605,21 +632,71 @@ export class Game {
       this.inOpeningArea = false;
     }
     if (this.input.consumePressed("KeyB") && this.openArmory()) return;
+    if (this.input.consumePressed("KeyV")) {
+      this.state.shoulderView = !this.state.shoulderView;
+      this.events.emit("ui:announce", {
+        text: this.state.shoulderView ? "Shoulder view" : "First-person view",
+        tone: "neutral", duration: 1.1,
+      });
+    }
     for (const [key, slot] of Object.entries(WEAPON_KEYS)) {
-      if (this.input.consumePressed(key) && this.state.equippedSlot !== slot) this.selectWeapon(slot);
+      if (this.input.consumePressed(key) && (this.state.equippedSlot !== slot || this.pendingThrow)) this.selectWeapon(slot);
     }
     for (const [key, id] of Object.entries(THROWABLE_KEYS)) {
       if (this.input.consumePressed(key)) this.state.throwable = id;
     }
-    if (this.input.consumePressed("KeyT")) {
+    if (this.input.consumePressed("KeyT") && !this.pendingThrow) {
       const id = this.state.throwable;
       if (!(this.economy.state.supplies[id] > 0)) {
         this.events.emit("ui:announce", { text: "Selected pouch is empty", tone: "warning", duration: 1.1 });
-      } else if (this.throwables.throw(id, this.player)) {
-        this.inOpeningArea = false;
-        this.economy.use(id);
-      }
+      } else this.startThrow(id);
     }
+  }
+
+  startThrow(id) {
+    const item = this.enemies.sharedAssets.weapons.create(id);
+    const hand = this.weaponInstances.get("vesper").rightSleeve.parent.clone(true);
+    hand.position.set(0.068, -0.035, 0.033);
+    hand.rotation.set(-0.74, 0.12, -0.62);
+    this.throwView.add(item.root, hand);
+    this.throwView.visible = true;
+    this.pendingThrow = { id, elapsed: 0 };
+    this.rifle.holster();
+    this.playerAvatar.setWeapon(id);
+    this.updateThrowView();
+  }
+
+  updateThrowView() {
+    const progress = Math.min(this.pendingThrow.elapsed / THROW_WINDUP, 1);
+    const windup = Math.sin(progress * Math.PI);
+    this.throwView.position.set(0.29 + windup * 0.10, -0.33 + progress * 0.31,
+      -0.49 + windup * 0.12 - progress * 0.19);
+    this.throwView.rotation.set(-0.55 + progress * 0.88, -0.17, -0.4 + progress * 0.52);
+  }
+
+  cancelThrow() {
+    if (!this.pendingThrow) return;
+    this.pendingThrow = null;
+    this.throwView.clear();
+    this.throwView.visible = false;
+    this.playerAvatar.setWeapon(this.activeWeaponId);
+  }
+
+  updateThrow(dt) {
+    if (!this.pendingThrow) return;
+    this.pendingThrow.elapsed += dt;
+    this.updateThrowView();
+    if (this.pendingThrow.elapsed < THROW_WINDUP) return;
+    this.updatePlayerAvatar(0, 1);
+    const { id } = this.pendingThrow;
+    if (this.throwables.throw(id, this.player, this.playerAvatar.heldPosition(_throwPosition))) {
+      this.economy.use(id);
+      this.inOpeningArea = false;
+    } else {
+      this.events.emit("ui:announce", { text: "Utility is still active", tone: "warning", duration: 1.1 });
+    }
+    this.cancelThrow();
+    this.rifle.equip();
   }
 
   applyQuality(name) {
@@ -643,6 +720,7 @@ export class Game {
   }
 
   finishMatch(result) {
+    this.cancelThrow();
     this.state.phase = result;
     if (result === "victory") this.economy.reward(CREDIT_REWARDS.victory);
     if (result === "victory" && this.state.mode === "sweep") {
@@ -683,6 +761,8 @@ export class Game {
     this.player.fixedUpdate(dt);
     if (this.state.phase !== "playing") return;
     this.player.syncAimCamera();
+    this.updateThrow(dt);
+    if (this.shoulderCamera.active && this.state.shoulderView) this.updatePlayerAvatar(0, 1);
     for (const weapon of this.weaponInstances.values()) weapon.fixedUpdate(dt);
     if (this.state.phase !== "playing") return;
     this.throwables.fixedUpdate(dt);
@@ -767,7 +847,7 @@ export class Game {
       weapon: this.rifle.snapshot,
       state: this.state,
     });
-    this.rendering.render(this.state.phase === "playing" && !this.state.controls.reducedMotion ? dt : 0);
+    this.renderFrame(dt, alpha);
     this.diagnostics.recordFrame(dt);
     this.diagnostics.rendererInfo = {
       memory: { ...this.rendering.renderer.info.memory },
@@ -776,6 +856,62 @@ export class Game {
     this.diagnostics.set("listeners", this.events.listenerCount());
     this.diagnostics.set("enemies", this.enemies.livingCount);
     this.diagnostics.set("particles", this.effects.snapshot.activeParticles);
+  }
+
+  updatePlayerAvatar(dt, alpha) {
+    const { player, playerAvatar: avatar, rifle } = this;
+    const snapshot = player.snapshot;
+    const { options } = rifle;
+    const position = avatar.root.position.lerpVectors(player.previousPosition, player.position, alpha);
+    avatar.setGround(position.y);
+    avatar.root.rotation.y = snapshot.yaw;
+    avatar.setWeapon(this.pendingThrow?.id ?? this.activeWeaponId);
+    const speed = snapshot.speed;
+    const sin = Math.sin(snapshot.yaw);
+    const cos = Math.cos(snapshot.yaw);
+    const normalSpeed = Math.max(0.001, speed);
+    avatar.animate(
+      dt,
+      snapshot.grounded ? Math.min(speed / player.options.walkSpeed, 1) : 0,
+      options.melee || this.pendingThrow ? 0 : Math.max(rifle.ads, snapshot.sprinting ? 0 : 0.52),
+      rifle.visualRecoil > 0.24,
+      0,
+      false,
+      {
+        aimDirection: this.rendering.camera.getWorldDirection(_avatarAim),
+        crouch: THREE.MathUtils.clamp(1 - (player.stanceHeight - player.options.crouchingHeight)
+          / (player.options.standingHeight - player.options.crouchingHeight), 0, 1),
+        airborne: !snapshot.grounded,
+        sliding: snapshot.sliding,
+        speed,
+        forward: (-player.velocity.x * sin - player.velocity.z * cos) / normalSpeed,
+        strafe: (player.velocity.x * cos - player.velocity.z * sin) / normalSpeed,
+        pitch: snapshot.pitch,
+        reload: rifle.snapshot.reloadProgress,
+        draw: rifle.drawRemaining / options.drawDuration,
+        swing: rifle.swingElapsed === null ? 0 : rifle.swingElapsed / options.fireInterval,
+        sprint: Number(snapshot.sprinting),
+        throwProgress: this.pendingThrow ? Math.min(1, this.pendingThrow.elapsed / THROW_WINDUP) : 0,
+      },
+    );
+  }
+
+  renderFrame(dt, alpha) {
+    const playing = this.state.phase === "playing";
+    const canObserve = this.state.shoulderView && !this.captureOverride
+      && (playing || this.state.phase === "paused" || this.state.phase === "armory")
+      && !(this.rifle.options.scope && this.rifle.ads > 0.52);
+    if (playing && (canObserve || this.pendingThrow)) {
+      this.updatePlayerAvatar(Math.min(dt, 0.05), alpha);
+    }
+    this.shoulderCamera.active = false;
+    const observed = canObserve && this.shoulderCamera.prepare(this.player);
+    this.playerAvatar.root.visible = observed;
+    try {
+      this.rendering.render(playing && !this.state.controls.reducedMotion ? dt : 0, !observed);
+    } finally {
+      if (observed) this.shoulderCamera.restore();
+    }
   }
 
   start() {
@@ -792,7 +928,7 @@ export class Game {
         });
         this.update(frame.frame, frame.alpha);
       } else if (!this.performanceRunning) {
-        this.rendering.render();
+        this.renderFrame(0, 1);
       }
       this.raf = requestAnimationFrame(loop);
     };
@@ -1078,6 +1214,7 @@ export class Game {
       quality: this.state.quality,
       economy: this.economy.snapshot(),
       equippedSlot: this.state.equippedSlot,
+      shoulderView: this.state.shoulderView,
       throwable: this.state.throwable,
       armoryAvailable: this.state.armoryAvailable,
     };
@@ -1234,6 +1371,9 @@ export class Game {
     this.ui.dispose();
     this.audio.dispose();
     this.throwables.dispose();
+    this.cancelThrow();
+    this.throwView.removeFromParent();
+    this.playerAvatar.dispose();
     this.enemies.dispose();
     this.effects.dispose();
     for (const weapon of this.weaponInstances.values()) weapon.dispose();

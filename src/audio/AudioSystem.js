@@ -500,7 +500,7 @@ export class AudioSystem {
   }
 
   _playRifle(options, enemy) {
-    const key = enemy ? 'enemy' : options.weaponId;
+    const key = options.weaponId ?? (enemy ? 'enemy' : 'vesper');
     const [crack, pitch, endPitch, bodyTime, tailTime, gain] = WEAPON_TIMBRES[key] ?? WEAPON_TIMBRES.vesper;
     const volume = clamp(options.volume ?? 1, 0, 1.5) * gain * 0.9;
     this._noise({

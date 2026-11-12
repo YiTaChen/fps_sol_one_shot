@@ -201,7 +201,7 @@ export class Throwables {
     };
   }
 
-  throw(id, player) {
+  throw(id, player, handPosition) {
     const item = Object.hasOwn(THROWABLES, id) ? THROWABLES[id] : null;
     const slot = this.slots.find(({ phase }) => phase === 'idle');
     const snapshot = player?.snapshot ?? player;
@@ -211,6 +211,13 @@ export class Throwables {
     this.angles.set(Number(snapshot.pitch) || 0, Number(snapshot.yaw) || 0, 0);
     this.aim.set(0, 0, -1).applyEuler(this.angles);
     slot.position.copy(snapshot.eyePosition).addScaledVector(SKY, -0.17);
+    if (handPosition) {
+      this.delta.subVectors(handPosition, slot.position);
+      const distance = this.delta.length();
+      if (distance > 0 && !this.context.physics?.raycast(slot.position, this.delta.divideScalar(distance), distance + ORB_CLEARANCE)) {
+        slot.position.copy(handPosition);
+      }
+    }
     slot.velocity.copy(this.aim).multiplyScalar(THROW_SPEED).addScaledVector(SKY, 2.35);
     if (snapshot.velocity?.isVector3) slot.velocity.addScaledVector(snapshot.velocity, 0.4);
 

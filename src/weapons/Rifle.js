@@ -823,6 +823,7 @@ export class Rifle {
 
   _worldMuzzle(out) {
     if (!this.camera) return out.set(0, 0, 0);
+    if (this.context?.visualMuzzle?.(out)) return out;
     this.camera.getWorldPosition(out);
     this.camera.getWorldDirection(FORWARD).normalize();
     RIGHT.set(1, 0, 0).applyQuaternion(this.camera.quaternion);

@@ -1,6 +1,6 @@
 {
   "status": "passed",
-  "durationMs": 12532.307168,
+  "durationMs": 13711.68607,
   "results": [
     {
       "name": "physics step contract",
@@ -15,7 +15,7 @@
     {
       "name": "enemy AI contract",
       "status": "passed",
-      "detail": "±35°, 2.88s reaction, 103/240 hits"
+      "detail": "±35°, 2.88s reaction, 102/240 hits"
     },
     {
       "name": "local progression contract",
@@ -145,7 +145,7 @@
     {
       "name": "browser armory and combat",
       "status": "passed",
-      "detail": "10 item images, free inspection, purchase, scope, switching, melee, and throwing"
+      "detail": "10 item images, free inspection, purchases, shoulder equipment, scope, melee, and utility release"
     },
     {
       "name": "console and page errors",
@@ -160,39 +160,39 @@
     "httpErrors": []
   },
   "gameDiagnostics": {
-    "frameCount": 84,
+    "frameCount": 87,
     "medianFrameMs": 50.00000074505806,
     "p95FrameMs": 250,
     "medianFps": 19.99999970197678,
-    "elapsedMs": 10704.299999999814,
+    "elapsedMs": 11505.599999999627,
     "counters": {
       "listeners": 83,
       "enemies": 5,
-      "particles": 24
+      "particles": 15
     },
     "errors": [],
     "renderer": {
       "memory": {
-        "geometries": 495,
-        "textures": 98
+        "geometries": 482,
+        "textures": 109
       },
       "render": {
-        "frame": 4654,
-        "calls": 0,
-        "triangles": 0,
+        "frame": 4933,
+        "calls": 1,
+        "triangles": 1,
         "points": 0,
         "lines": 0
       }
     },
     "rendererInfo": {
       "memory": {
-        "geometries": 495,
-        "textures": 98
+        "geometries": 482,
+        "textures": 109
       },
       "render": {
-        "frame": 4654,
-        "calls": 0,
-        "triangles": 0,
+        "frame": 4933,
+        "calls": 1,
+        "triangles": 1,
         "points": 0,
         "lines": 0
       }

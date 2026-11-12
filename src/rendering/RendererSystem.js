@@ -295,7 +295,7 @@ export class RendererSystem {
     return { width: _viewport.x, height: _viewport.y };
   }
 
-  render(deltaSeconds = 0) {
+  render(deltaSeconds = 0, viewmodel = true) {
     this.sky.position.copy(this.camera.position);
     if (!this.motionPreference.matches) {
       this.ash.material.uniforms.clock.value += deltaSeconds;
@@ -316,8 +316,10 @@ export class RendererSystem {
     }
     this.renderer.setRenderTarget(null);
     this.composer.render();
-    this.renderer.clearDepth();
-    this.renderer.render(this.viewScene, this.viewCamera);
+    if (viewmodel) {
+      this.renderer.clearDepth();
+      this.renderer.render(this.viewScene, this.viewCamera);
+    }
   }
 
   prewarm() {

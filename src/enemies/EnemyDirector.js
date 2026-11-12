@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createEnemySharedAssets, createEnemySoldier } from './EnemySoldier.js';
+import { WEAPON_DEFINITIONS } from '../weapons/Arsenal.js';
 
 export const EnemyState = Object.freeze({
   IDLE: 'idle',
@@ -27,6 +28,12 @@ const ENEMY_VISION_DOT = Math.cos(
 const DETECTION_CONFIRM_SECONDS = 0.32;
 const CORPSE_DESPAWN_SECONDS = 8;
 const ACTIVE_ENEMY_LIMIT = 12;
+const PATROL_WEAPONS = ['vesper', 'smg', 'vesper', 'precision', 'smg', 'vesper', 'precision'];
+const PATROL_HANDLING = {
+  vesper: { interval: [0.105, 0.155], damage: 1 },
+  smg: { interval: [0.084, 0.116], damage: 0.74 },
+  precision: { interval: [0.96, 1.04], damage: 1.7 },
+};
 
 const DEFAULT_SPAWNS = Object.freeze([
   [-21, 0, -18, 0.5],
@@ -66,6 +73,7 @@ const tmpLineOrigin = new THREE.Vector3();
 const tmpAimRight = new THREE.Vector3();
 const tmpAimUp = new THREE.Vector3();
 const tmpDesiredVelocity = new THREE.Vector3();
+const tmpMoveStart = new THREE.Vector3();
 const tmpPlayerFoot = new THREE.Vector3();
 const tmpCapsuleStart = new THREE.Vector3();
 const tmpCapsuleEnd = new THREE.Vector3();
@@ -288,6 +296,8 @@ export class EnemyDirector {
         id: enemy.id,
         alive: enemy.alive,
         health: enemy.health,
+        weaponId: enemy.weapon.id,
+        magazine: enemy.magazine,
         state: enemy.state,
         position: enemy.rig.root.position,
         alerted: enemy.alerted,
@@ -421,7 +431,8 @@ export class EnemyDirector {
     const spawn = this._chooseSpawn(spawnStream, id, reinforcement);
     const visualStream = getRawStream(this.rngService, `enemy-visual:${id}`, this.seed);
     const visualVariant = randomInt(visualStream, 0, 4);
-    const rig = createEnemySoldier(id, visualVariant, this.sharedAssets);
+    const weapon = WEAPON_DEFINITIONS[PATROL_WEAPONS[id % PATROL_WEAPONS.length]];
+    const rig = createEnemySoldier(id, visualVariant, this.sharedAssets, weapon.id);
     rig.root.position.copy(spawn.position);
     rig.root.position.y += 0.015;
     rig.root.rotation.y = spawn.yaw;
@@ -441,6 +452,7 @@ export class EnemyDirector {
       rig,
       rng: enemyStream,
       visualVariant,
+      weapon,
       spawnPosition: spawn.position.clone(),
       spawnYaw: spawn.yaw,
       alive: true,
@@ -485,7 +497,7 @@ export class EnemyDirector {
       shotsFired: 0,
       shotTimer: 0,
       reloadTimer: 0,
-      magazine: 30,
+      magazine: weapon.magazineCapacity,
       nextFootstep: 0,
       moveSpeed: randomRange(enemyStream, 2.15, 2.72),
       accuracy: randomRange(enemyStream, 0.46, 0.68),
@@ -493,6 +505,9 @@ export class EnemyDirector {
       hitReaction: 0,
       damageDirection: new THREE.Vector3(),
       renderMotion: 0,
+      renderSpeed: 0,
+      renderStrafe: 0,
+      renderForward: 1,
       renderAim: 0,
       renderFire: false,
       groundTimer: id * 0.006,
@@ -711,6 +726,10 @@ export class EnemyDirector {
       enemy.hitReaction = Math.max(0, enemy.hitReaction - dt * 3.6);
       enemy.suppression = Math.max(0, enemy.suppression - dt * 0.13);
       enemy.renderFire = false;
+      if (enemy.reloadTimer > 0) {
+        enemy.reloadTimer = Math.max(0, enemy.reloadTimer - dt);
+        if (enemy.reloadTimer === 0) enemy.magazine = enemy.weapon.magazineCapacity;
+      }
 
       if (playerAlive && enemy.perceptionTimer <= 0) {
         enemy.perceptionTimer += enemy.perceptionInterval;
@@ -740,13 +759,15 @@ export class EnemyDirector {
     if (!this.context || dt <= 0) return;
     const highQuality = this.context.quality?.name === 'high';
     const detailDistance = highQuality ? 21 : 12;
+    const weaponDistance = highQuality ? 16 : 7;
     const camera = this.context.camera;
     const capture = this.state?.phase === 'capture';
     for (let i = 0; i < this.enemies.length; i += 1) {
       const enemy = this.enemies[i];
       if (enemy.despawned) continue;
-      const near = capture || !camera || enemy.rig.root.position.distanceToSquared(camera.position) < detailDistance ** 2;
-      enemy.rig.setRenderDetail?.(near, highQuality || capture);
+      const cameraDistance = camera ? enemy.rig.root.position.distanceToSquared(camera.position) : 0;
+      const near = capture || cameraDistance < detailDistance ** 2;
+      enemy.rig.setRenderDetail?.(near, highQuality || capture, capture || cameraDistance < weaponDistance ** 2);
       enemy.rig.animate(
         Math.min(dt, 1 / 20),
         enemy.renderMotion,
@@ -754,6 +775,13 @@ export class EnemyDirector {
         enemy.renderFire,
         enemy.hitReaction,
         !enemy.alive,
+        {
+          aimPoint: enemy.canSeePlayer ? enemy.aimPoint : null,
+          reload: enemy.reloadTimer > 0 ? 1 - enemy.reloadTimer / enemy.weapon.emptyReloadDuration : 0,
+          speed: enemy.renderMotion > 0 ? enemy.renderSpeed : 0,
+          strafe: enemy.renderStrafe,
+          forward: enemy.renderForward,
+        },
       );
       if (!enemy.alive) {
         enemy.rig.root.position.y = enemy.groundY;
@@ -987,10 +1015,12 @@ export class EnemyDirector {
           this._transition(enemy, EnemyState.INVESTIGATE);
         } else if (
           enemy.canSeePlayer
+          && enemy.reloadTimer <= 0
           && enemy.aimAlignment >= Math.cos(THREE.MathUtils.degToRad(11))
           && enemy.stateTime >= enemy.aimSettleTimer
         ) {
-          enemy.burstRemaining = randomInt(enemy.rng, 2, 5);
+          enemy.burstRemaining = enemy.weapon.automatic
+            ? Math.min(enemy.magazine, randomInt(enemy.rng, 2, 5)) : 1;
           enemy.burstShotIndex = 0;
           enemy.shotTimer = randomRange(enemy.rng, 0.08, 0.22);
           this._transition(enemy, EnemyState.FIRE);
@@ -1015,7 +1045,7 @@ export class EnemyDirector {
           this._fire(enemy);
           enemy.burstRemaining -= 1;
           enemy.burstShotIndex += 1;
-          enemy.shotTimer = randomRange(enemy.rng, 0.105, 0.155);
+          enemy.shotTimer = randomRange(enemy.rng, ...PATROL_HANDLING[enemy.weapon.id].interval);
         }
         if (enemy.burstRemaining <= 0 && enemy.shotTimer <= 0) {
           enemy.aimSettleTimer = randomRange(enemy.rng, 0.52, 0.94);
@@ -1092,6 +1122,7 @@ export class EnemyDirector {
       }
     }
 
+    tmpMoveStart.copy(enemy.rig.root.position);
     let moved = false;
     if (
       typeof this.physics?.moveCapsule === 'function' &&
@@ -1109,7 +1140,15 @@ export class EnemyDirector {
     }
     if (!moved) enemy.rig.root.position.add(tmpDelta);
 
-    enemy.renderMotion = Math.min(1, speed / 2.7);
+    tmpDelta.subVectors(enemy.rig.root.position, tmpMoveStart).setY(0);
+    const distanceMoved = tmpDelta.length();
+    enemy.renderSpeed = distanceMoved / dt;
+    enemy.renderMotion = Math.min(1, enemy.renderSpeed / 2.7);
+    if (distanceMoved <= 0.001) return false;
+    tmpDelta.multiplyScalar(1 / distanceMoved);
+    const yaw = enemy.rig.root.rotation.y;
+    enemy.renderForward = -tmpDelta.x * Math.sin(yaw) - tmpDelta.z * Math.cos(yaw);
+    enemy.renderStrafe = tmpDelta.x * Math.cos(yaw) - tmpDelta.z * Math.sin(yaw);
     enemy.nextFootstep -= dt;
     if (enemy.nextFootstep <= 0) {
       enemy.nextFootstep = 0.44 / Math.max(0.55, enemy.renderMotion);
@@ -1213,7 +1252,7 @@ export class EnemyDirector {
     );
     const clearShot = Number.isFinite(playerHitDistance)
       && worldDistance >= playerHitDistance - 0.04;
-    const damage = randomRange(enemy.rng, 8.5, 13.5);
+    const damage = randomRange(enemy.rng, 8.5, 13.5) * PATROL_HANDLING[enemy.weapon.id].damage;
     const terminalDistance = clearShot
       ? playerHitDistance
       : Number.isFinite(worldDistance)
@@ -1229,9 +1268,10 @@ export class EnemyDirector {
       id: `enemy-${enemy.id}-${this._shotSerial++}`,
       kind: 'enemy',
       source: enemy.id,
+      weaponId: enemy.weapon.id,
       origin: tmpMuzzle.clone(),
       direction: tmpDirection.clone(),
-      velocity: tmpDirection.clone().multiplyScalar(120),
+      velocity: tmpDirection.clone().multiplyScalar(enemy.weapon.projectileSpeed),
       damage,
       maxDistance: 80,
       clearShot,
@@ -1245,14 +1285,12 @@ export class EnemyDirector {
       source: `enemy:${enemy.id}`,
       kind: 'enemy',
       enemyId: enemy.id,
+      weaponId: enemy.weapon.id,
+      flashScale: enemy.weapon.flashScale,
+      volume: 0.82,
       position: tmpMuzzle.clone(),
       direction: tmpDirection.clone(),
       tracerEnd: end.clone(),
-    });
-    emit(this.events, 'audio:play', {
-      name: 'enemy-fire',
-      position: tmpMuzzle.clone(),
-      volume: 0.82,
     });
     emit(this.events, 'projectile:impact', {
       kind: clearShot || !worldHit ? 'tracer-end' : 'world',
@@ -1274,8 +1312,7 @@ export class EnemyDirector {
     }
 
     if (enemy.magazine <= 0) {
-      enemy.magazine = 30;
-      enemy.shotTimer += 2.1;
+      enemy.reloadTimer = enemy.weapon.emptyReloadDuration;
       emit(this.events, 'audio:play', {
         name: 'enemy-reload',
         position: enemy.rig.root.position.clone(),
