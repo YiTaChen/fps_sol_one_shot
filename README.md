@@ -73,8 +73,8 @@ competitive progression would require a backend.
 ## Armory and credits
 
 Open **Armory** on the main menu to outfit a Relay Run before deploying. Select
-an item image to see its details and in-game model. Drag the model or use the
-rotation controls to inspect it. The separate purchase button shows the price
+an item image to see its details and in-game model. Drag the model to rotate
+it and use **+ / −** for a closer look. The separate purchase button shows the price
 and availability. Press **B** at the deployment locker or at a powered relay
 when nearby hostiles have been cleared. Each new run starts with **1,400 credits**. An elimination earns
 125, a restored relay earns 250, and an operation clear earns 400. Credits and
@@ -172,6 +172,7 @@ camera sway settings, saved in the browser.
 | `G` | Queue the decoy at the last powered station |
 | `B` | Open a secure armory locker |
 | `V` | Toggle first-person and shoulder view |
+| `I` | Inspect the equipped weapon |
 | `1` / `2` / `3` | Primary / sidearm / melee |
 | `4` / `5` / `6` | Select Pulse / Haze / Stasis |
 | `T` | Throw the selected utility |

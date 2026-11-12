@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { WEAPON_DEFINITIONS } from './Arsenal.js';
 import { ProjectileSystem } from './ProjectileSystem.js';
 import { buildVariantModel } from './VariantModel.js';
+import { acquireWeaponSurfaces, makeWeaponMark } from './WeaponSurfaces.js';
 
 const FORWARD = new THREE.Vector3();
 const RIGHT = new THREE.Vector3();
@@ -14,6 +15,14 @@ const POSE_POSITION = new THREE.Vector3();
 const HIP_POSITION = new THREE.Vector3(0.242, -0.24, -0.79);
 const ADS_POSITION = new THREE.Vector3(0, -0.18, -0.6);
 const SPRINT_POSITION = new THREE.Vector3(0.38, -0.39, -0.24);
+const INSPECT_POSITION = new THREE.Vector3(0.16, -0.15, -1.08);
+const INSPECT_ROTATION = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.14, 1.14, 0.11, 'YXZ'));
+const INSPECT_LEFT_ELBOW = new THREE.Vector3(-0.40, -0.83, -0.55);
+const INSPECT_RIGHT_ELBOW = new THREE.Vector3(0.62, -0.77, -0.55);
+const SLEEVE_AXIS = new THREE.Vector3(0, 0, 1);
+const SLEEVE_END = new THREE.Vector3();
+const SLEEVE_DIR = new THREE.Vector3();
+const INSPECT_DURATION = 1.85;
 const LEFT_HAND_HOME = new THREE.Vector3(-0.025, -0.006, -0.34);
 const POSE_EULER = new THREE.Euler(0, 0, 0, 'YXZ');
 const POSE_QUATERNION = new THREE.Quaternion();
@@ -26,6 +35,14 @@ const SPRINT_QUATERNION = new THREE.Quaternion().setFromEuler(
 );
 const TEMP_QUATERNION = new THREE.Quaternion();
 const TEMP_COLOR = new THREE.Color();
+const PAINT = {
+  vesper: [0x6c8392, 0x626e70],
+  smg: [0x78837f, 0x67726e],
+  precision: [0x7b8278, 0x687368],
+  sidearm: [0x6e879b, 0x586c76],
+  'heavy-sidearm': [0x79858d, 0x5e696d],
+  melee: [0x748993, 0x5c6c68],
+};
 
 const RECOIL_PATTERN = Object.freeze([
   [0.0125, -0.0012],
@@ -162,44 +179,6 @@ function rngFloat(stream) {
   return 0.5;
 }
 
-function makeTexture(base, variation, seed, roughness = false) {
-  const size = 128;
-  const data = new Uint8Array(size * size * 4);
-  const seedValue = hashSeed(seed);
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      let h = Math.imul(x + 11, 374761393) ^ Math.imul(y + 7, 668265263) ^ seedValue;
-      h = Math.imul(h ^ (h >>> 13), 1274126177);
-      h ^= h >>> 16;
-      const noise = ((h >>> 0) / 4294967295 - 0.5) * variation;
-      const streak = Math.sin((x + (seedValue & 31)) * 0.42) * variation * 0.12;
-      const index = (y * size + x) * 4;
-      if (roughness) {
-        const value = THREE.MathUtils.clamp(base[0] + noise + streak, 0, 255);
-        data[index] = value;
-        data[index + 1] = value;
-        data[index + 2] = value;
-      } else {
-        data[index] = THREE.MathUtils.clamp(base[0] + noise + streak, 0, 255);
-        data[index + 1] = THREE.MathUtils.clamp(base[1] + noise, 0, 255);
-        data[index + 2] = THREE.MathUtils.clamp(base[2] + noise - streak, 0, 255);
-      }
-      data[index + 3] = 255;
-    }
-  }
-  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3.4, 5.5);
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.generateMipmaps = true;
-  texture.anisotropy = 4;
-  texture.colorSpace = roughness ? THREE.NoColorSpace : THREE.SRGBColorSpace;
-  texture.needsUpdate = true;
-  return texture;
-}
-
 function profileGeometry(points, depth, bevel = 0.006) {
   const shape = new THREE.Shape();
   shape.moveTo(points[0][0], points[0][1]);
@@ -222,13 +201,20 @@ function profileGeometry(points, depth, bevel = 0.006) {
 // Extrudes a Z/Y silhouette across X. Unlike a conventional box, this keeps
 // each major weapon mass readable in profile while the bevel creates a
 // continuous manufactured highlight around its full perimeter.
-function sideProfileGeometry(points, width, bevel = 0.006) {
+function sideProfileGeometry(points, width, bevel = 0.006, openings = []) {
   const shape = new THREE.Shape();
   shape.moveTo(points[0][0], points[0][1]);
   for (let i = 1; i < points.length; i += 1) {
     shape.lineTo(points[i][0], points[i][1]);
   }
   shape.closePath();
+  for (const ring of openings) {
+    const opening = new THREE.Path();
+    opening.moveTo(...ring[0]);
+    for (const point of ring.slice(1)) opening.lineTo(...point);
+    opening.closePath();
+    shape.holes.push(opening);
+  }
   const geometry = new THREE.ExtrudeGeometry(shape, {
     depth: width,
     bevelEnabled: bevel > 0,
@@ -332,6 +318,7 @@ export class Rifle {
     this.triggerHeld = false;
     this.triggerWasDown = false;
     this.drawRemaining = 0;
+    this.inspectRemaining = 0;
     this.swingElapsed = null;
     this.adsWanted = false;
     this.ads = 0;
@@ -354,11 +341,13 @@ export class Rifle {
     this._inputLatch = Object.create(null);
     this._disposers = [];
     this._materials = [];
-    this._textures = [];
+    this._surfaceLease = null;
     this._modelBuilt = false;
     this.variant = null;
     this.rightSleeve = null;
     this.leftSleeveMesh = null;
+    this.forearms = [];
+    this.inspectionArms = false;
     this._rng = new LocalRng('cinderline:weapon-spread');
     this._reloadFromEmpty = false;
 
@@ -500,6 +489,11 @@ export class Rifle {
       this.triggerHeld = false;
       this.triggerBuffer = 0;
       this.adsWanted = false;
+      this.inspectRemaining = 0;
+      if (this.inspectionArms) {
+        this.poseInspectionArms(0);
+        for (const { sleeve } of this.forearms) sleeve.scale.setScalar(1);
+      }
     }
     this.root.visible = this.enabled && !this.snapshot.scoped;
     this._syncSnapshot();
@@ -538,6 +532,7 @@ export class Rifle {
     }
     this.dryCooldown = Math.max(0, this.dryCooldown - dt);
     this.drawRemaining = Math.max(0, this.drawRemaining - dt);
+    this.inspectRemaining = Math.max(0, this.inspectRemaining - dt);
     this.recoilBloom = Math.max(0, this.recoilBloom - dt * 0.026);
 
     if (!this.enabled) {
@@ -575,6 +570,12 @@ export class Rifle {
     this._playerSnapshot = this.context?.state?.player
       ?? this.context?.state?.playerSnapshot
       ?? this._playerSnapshot;
+    const inspectPressed = inputPressed(this.input, this._inputLatch, 'inspect', 'KeyI');
+    const busy = wantsFire || pressed || inputADS || this.reloading || this.swingElapsed !== null
+      || this.drawRemaining > 0 || this._playerSnapshot?.sprinting
+      || (this.options.boltCycle && this.fireCooldown > 0);
+    if (busy) this.inspectRemaining = 0;
+    else if (inspectPressed) this.inspectRemaining = INSPECT_DURATION;
 
     if (this.options.melee) this._advanceSwing(dt);
     if (this.reloading) {
@@ -637,6 +638,13 @@ export class Rifle {
       POSE_EULER.set(-arc * 0.23, arc * 1.2, -arc * 0.75, 'YXZ');
       POSE_QUATERNION.multiply(TEMP_QUATERNION.setFromEuler(POSE_EULER));
     }
+    const presentation = this.inspectRemaining > 0
+      ? smoothstep((INSPECT_DURATION - this.inspectRemaining) / 0.27) * smoothstep(this.inspectRemaining / 0.33)
+      : 0;
+    if (presentation > 0) {
+      POSE_POSITION.lerp(INSPECT_POSITION, presentation);
+      POSE_QUATERNION.slerp(INSPECT_ROTATION, presentation);
+    }
     const exactCaptureADS = this.ads === 1
       && this.context?.state?.phase === 'capture';
     if (exactCaptureADS) {
@@ -669,9 +677,31 @@ export class Rifle {
       this.root.quaternion.multiply(TEMP_QUATERNION);
     }
     this._animateReload();
+    this.poseInspectionArms(presentation);
     this._updateAimRay();
     this._syncSnapshot();
     this.root.visible = this.enabled && !this.snapshot.scoped;
+  }
+
+  poseInspectionArms(weight) {
+    if (!weight && !this.inspectionArms) return;
+    this.inspectionArms = Boolean(weight);
+    if (weight && this.options.slot === 'primary') {
+      this.leftHand.position.y -= weight * 0.043;
+      this.leftHand.position.x += weight * 0.018;
+    }
+    for (const { sleeve, cuff, position, orientation, elbow, length } of this.forearms) {
+      sleeve.position.copy(position);
+      sleeve.quaternion.copy(orientation);
+      if (!weight || !sleeve.parent.visible) continue;
+      sleeve.parent.worldToLocal(SLEEVE_END.copy(elbow));
+      SLEEVE_DIR.subVectors(cuff.position, SLEEVE_END);
+      const reach = SLEEVE_DIR.length();
+      if (reach <= 0.001) continue;
+      sleeve.position.lerp(SLEEVE_END.lerp(cuff.position, 0.5), weight);
+      sleeve.quaternion.slerp(TEMP_QUATERNION.setFromUnitVectors(SLEEVE_AXIS, SLEEVE_DIR.divideScalar(reach)), weight);
+      sleeve.scale.z = THREE.MathUtils.lerp(sleeve.scale.z, reach / length, weight);
+    }
   }
 
   _fire() {
@@ -942,26 +972,23 @@ export class Rifle {
 
   _buildModel() {
     this._modelBuilt = true;
-    const metalMap = makeTexture([52, 57, 61], 13, 'weapon-metal');
-    const metalRough = makeTexture([112, 112, 112], 48, 'weapon-metal-r', true);
-    const polymerMap = makeTexture([57, 62, 62], 10, 'weapon-polymer');
-    const polymerRough = makeTexture([172, 172, 172], 34, 'weapon-polymer-r', true);
-    const gloveMap = this.options.inspection ? null : makeTexture([73, 84, 70], 24, 'weapon-glove');
-    const gloveRough = this.options.inspection ? null : makeTexture([205, 205, 205], 26, 'weapon-glove-r', true);
-    this._textures.push(metalMap, metalRough, polymerMap, polymerRough);
-    if (gloveMap && gloveRough) this._textures.push(gloveMap, gloveRough);
+    const surfaces = this._surfaceLease = acquireWeaponSurfaces();
+    const [metalPaint, polymerPaint] = PAINT[this.options.id] ?? PAINT.vesper;
+    const mark = makeWeaponMark(this.options.id, surfaces.marks, this.weapon, this._materials);
 
     const gunmetal = new THREE.MeshPhysicalMaterial({
-      map: metalMap,
-      roughnessMap: metalRough,
-      roughness: 0.39,
-      metalness: 0.61,
+      ...surfaces.metal,
+      name: 'Ceramic-coated alloy',
+      color: metalPaint,
+      normalScale: new THREE.Vector2(0.35, 0.35),
+      roughness: 0.69,
+      metalness: 0.46,
       clearcoat: 0.12,
-      clearcoatRoughness: 0.38,
+      clearcoatRoughness: 0.45,
     });
     const darkMetal = new THREE.MeshPhysicalMaterial({
-      color: 0x343b3d,
-      roughness: 0.4,
+      color: 0x39474e,
+      roughness: 0.50,
       metalness: 0.52,
       clearcoat: 0.13,
       clearcoatRoughness: 0.4,
@@ -972,9 +999,9 @@ export class Rifle {
       metalness: 0.82,
     });
     const railMetal = new THREE.MeshStandardMaterial({
-      color: 0x51575a,
-      roughness: 0.34,
-      metalness: 0.72,
+      color: 0x687980,
+      roughness: 0.39,
+      metalness: 0.68,
     });
     const accentMetal = new THREE.MeshStandardMaterial({
       color: 0x9a7443,
@@ -982,9 +1009,11 @@ export class Rifle {
       metalness: 0.64,
     });
     const polymer = new THREE.MeshStandardMaterial({
-      map: polymerMap,
-      roughnessMap: polymerRough,
-      roughness: 0.7,
+      ...surfaces.polymer,
+      name: 'Glass-filled polymer',
+      color: polymerPaint,
+      normalScale: new THREE.Vector2(0.42, 0.42),
+      roughness: 0.86,
       metalness: 0.03,
     });
     const rubber = new THREE.MeshStandardMaterial({
@@ -1019,14 +1048,16 @@ export class Rifle {
       toneMapped: false,
     });
     const glove = new THREE.MeshStandardMaterial({
-      map: gloveMap,
-      roughnessMap: gloveRough,
+      ...surfaces.fabric,
+      color: 0x88968d,
+      normalScale: new THREE.Vector2(0.48, 0.48),
       roughness: 0.92,
       metalness: 0,
     });
     const sleeve = new THREE.MeshStandardMaterial({
-      color: 0x323639,
-      map: gloveMap,
+      ...surfaces.fabric,
+      color: 0x6a7c88,
+      normalScale: new THREE.Vector2(0.42, 0.42),
       roughness: 0.92,
       metalness: 0,
     });
@@ -1048,7 +1079,7 @@ export class Rifle {
     if (this.options.id !== 'vesper' && WEAPON_DEFINITIONS[this.options.id]) {
       this.variant = buildVariantModel(this.weapon, this.options.id, {
         gunmetal, darkMetal, exposedMetal, railMetal, accentMetal, polymer, rubber, opticGlass, reticle,
-      }, { roundedPart, cylinderPart, sideProfileGeometry });
+      }, { roundedPart, cylinderPart, sideProfileGeometry, mark });
       if (!this.options.inspection) {
         this._buildHands(glove, sleeve, rubber);
         if (!this.variant.support) this.leftHand.visible = false;
@@ -1149,10 +1180,24 @@ export class Rifle {
       1,
       'kestrel-identity-plate',
     );
+    mark?.({ x: -0.059, y: 0.025, z: 0.037, width: 0.114, height: 0.024, side: -1 });
+    for (const side of [-1, 1]) {
+      const join = new THREE.Mesh(sideProfileGeometry([
+        [-0.135, -0.033], [-0.101, -0.048], [0.079, -0.048],
+        [0.119, -0.036], [0.106, -0.03], [-0.089, -0.031],
+      ], 0.004, 0.0015), darkMetal);
+      join.position.x = side * 0.054;
+      join.name = 'receiver-lower-panel-joint';
+      this.weapon.add(join);
+    }
 
-    // Free-float handguard: one tapered, side-profiled shell with bevelled
-    // shoulders. Recessed side slots sit on the shell instead of forming a
-    // stack of disconnected rail blocks.
+    const coolingOpenings = Array.from({ length: 5 }, (_, index) => {
+      const z = -0.231 - index * 0.069;
+      return [
+        [z - 0.021, -0.013], [z - 0.015, 0.027], [z + 0.016, 0.032],
+        [z + 0.023, 0.021], [z + 0.017, -0.016], [z - 0.015, -0.022],
+      ];
+    });
     const handguard = new THREE.Mesh(sideProfileGeometry([
       [-0.596, 0.032],
       [-0.578, 0.068],
@@ -1163,9 +1208,15 @@ export class Rifle {
       [-0.188, -0.071],
       [-0.531, -0.066],
       [-0.579, -0.034],
-    ], 0.128, 0.007), gunmetal);
+    ], 0.128, 0.005, coolingOpenings), gunmetal);
     handguard.name = 'profiled-free-float-handguard';
     this.weapon.add(handguard);
+    const coolingLiner = new THREE.Mesh(axialProfileGeometry([
+      [-0.576, 0.02], [-0.555, 0.028], [-0.185, 0.028], [-0.17, 0.023],
+    ], 20), darkMetal);
+    coolingLiner.position.y = 0.014;
+    coolingLiner.name = 'recessed-cooling-liner';
+    this.weapon.add(coolingLiner);
 
     const guardRail = new THREE.Mesh(sideProfileGeometry([
       [-0.579, 0.077],
@@ -1185,20 +1236,6 @@ export class Rifle {
         1,
         'handguard-rail-tooth',
       );
-    }
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < 5; i += 1) {
-        const z = -0.236 - i * 0.065;
-        const vent = new THREE.Mesh(sideProfileGeometry([
-          [z - 0.021, -0.018],
-          [z - 0.016, 0.025],
-          [z + 0.021, 0.025],
-          [z + 0.016, -0.018],
-        ], 0.004, 0.001), darkMetal);
-        vent.position.x = side * 0.066;
-        vent.name = 'machined-handguard-vent';
-        this.weapon.add(vent);
-      }
     }
     const lowerInlay = new THREE.Mesh(sideProfileGeometry([
       [-0.52, -0.067],
@@ -1648,7 +1685,7 @@ export class Rifle {
       this.leftHand,
       0.04,
       0.049,
-      0.29,
+      0.34,
       new THREE.Vector3(-0.088, -0.198, 0.131),
       sleeve,
       20,
@@ -1659,6 +1696,13 @@ export class Rifle {
       new THREE.Vector3(0, 0, 1),
       new THREE.Vector3(0.054, 0.092, -0.097).normalize(),
     );
+    leftSleeve.position.addScaledVector(SLEEVE_DIR.copy(SLEEVE_AXIS).applyQuaternion(leftSleeve.quaternion), -0.025);
+    this.forearms = [
+      { sleeve: rightSleeve, cuff: rightCuff, elbow: INSPECT_RIGHT_ELBOW, length: 0.31 },
+      { sleeve: leftSleeve, cuff: leftCuff, elbow: INSPECT_LEFT_ELBOW, length: 0.34 },
+    ].map((arm) => ({
+      ...arm, position: arm.sleeve.position.clone(), orientation: arm.sleeve.quaternion.clone(),
+    }));
 
     // Four separated support fingers form a C-clamp around the rail. Their
     // distal joints terminate against the far face instead of passing through.
@@ -1703,7 +1747,8 @@ export class Rifle {
     this.snapshot.action = this.drawRemaining > 0 ? 'draw'
       : this.swingElapsed !== null ? 'swing'
         : this.reloading ? 'reload'
-          : this.options.boltCycle && this.fireCooldown > 0 ? 'bolt' : 'idle';
+          : this.options.boltCycle && this.fireCooldown > 0 ? 'bolt'
+            : this.inspectRemaining > 0 ? 'inspect' : 'idle';
     const player = this.context?.state?.player
       ?? this.context?.state?.playerSnapshot
       ?? this._playerSnapshot;
@@ -1725,6 +1770,7 @@ export class Rifle {
     this.triggerHeld = false;
     this.triggerWasDown = false;
     this.drawRemaining = 0;
+    this.inspectRemaining = 0;
     this.swingElapsed = null;
     this.adsWanted = false;
     this.ads = 0;
@@ -1772,9 +1818,9 @@ export class Rifle {
       if (object.geometry) object.geometry.dispose();
     });
     for (const material of this._materials) material.dispose();
-    for (const texture of this._textures) texture.dispose();
+    this._surfaceLease?.release();
+    this._surfaceLease = null;
     this._materials.length = 0;
-    this._textures.length = 0;
     this.projectiles.dispose();
     this.context = null;
     this.events = null;

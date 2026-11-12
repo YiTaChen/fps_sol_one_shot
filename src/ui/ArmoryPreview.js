@@ -7,7 +7,10 @@ import { THROWABLES } from '../weapons/Throwables.js';
 const ROTATION_STEP = Math.PI / 12;
 const DRAG_SENSITIVITY = 0.011;
 const MAX_PITCH = 0.86;
-const CAMERA_DIRECTION = new THREE.Vector3(0, 0.13, 1).normalize();
+const ZOOM_INCREMENT = 1.17;
+const MAX_ZOOM_STEPS = 5;
+export const ARMORY_CAMERA_DIRECTION = new THREE.Vector3(0, 0.13, 1).normalize();
+const CAMERA_DIRECTION = ARMORY_CAMERA_DIRECTION;
 const CAMERA_UP = new THREE.Vector3(0, CAMERA_DIRECTION.z, -CAMERA_DIRECTION.y);
 
 function itemLabel(id) {
@@ -20,6 +23,57 @@ function directionalLight(scene, color, intensity, x, y, z) {
   const light = new THREE.DirectionalLight(color, intensity);
   light.position.set(x, y, z);
   scene.add(light);
+}
+
+export function configureArmoryRenderer(renderer) {
+  renderer.setClearColor(0x0e1720, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.12;
+}
+
+export function lightArmoryScene(scene) {
+  scene.environmentIntensity = 1.08;
+  scene.add(new THREE.HemisphereLight(0xddeaff, 0x67534b, 0.78));
+  directionalLight(scene, 0xffe5ca, 2.85, -3.1, 4.6, 2.8);
+  directionalLight(scene, 0xc3dcef, 0.74, 3.5, 0.8, 1.4);
+  directionalLight(scene, 0xa1c9e6, 2.6, 0.6, 2.0, -3.8);
+}
+
+export function createArmoryEnvironment(renderer) {
+  const room = new RoomEnvironment();
+  const generator = new THREE.PMREMGenerator(renderer);
+  try {
+    return generator.fromScene(room, 0.045);
+  } finally {
+    generator.dispose();
+    room.dispose();
+  }
+}
+
+export function setArmoryHomeRotation(rotation, id) {
+  if (id === 'reserve-case') rotation.set(0.44, -0.36, 0, 'YXZ');
+  else if (Object.hasOwn(THROWABLES, id)) rotation.set(0.25, 0.62, 0, 'YXZ');
+  else rotation.set(0.13, 1.32, -0.055, 'YXZ');
+}
+
+export function armoryBoundsCorners(root) {
+  const corners = [];
+  root.updateMatrixWorld(true);
+  root.traverseVisible((object) => {
+    if (!object.isMesh) return;
+    const geometry = object.geometry;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const { min, max } = geometry.boundingBox;
+    for (const x of [min.x, max.x]) {
+      for (const y of [min.y, max.y]) {
+        for (const z of [min.z, max.z]) {
+          corners.push(new THREE.Vector3(x, y, z).applyMatrix4(object.matrixWorld));
+        }
+      }
+    }
+  });
+  return corners;
 }
 
 /** A single lazy turntable that uses the same mesh construction as the game. */
@@ -38,10 +92,7 @@ export class ArmoryPreview {
     this.boundsCorners = [];
     this.fitPoint = new THREE.Vector3();
     this.scene.add(this.pivot);
-    this.scene.add(new THREE.HemisphereLight(0xe2f4ff, 0x3b3433, 1.6));
-    directionalLight(this.scene, 0xffeddb, 3.2, 2.1, 3.5, 3.6);
-    directionalLight(this.scene, 0x8ac8e8, 2.4, -2.3, 0.9, -2.3);
-    directionalLight(this.scene, 0x9dd0dd, 0.7, -2.5, 1, 3);
+    lightArmoryScene(this.scene);
 
     this.renderer = null;
     this.canvas = null;
@@ -58,6 +109,7 @@ export class ArmoryPreview {
     this.width = 0;
     this.height = 0;
     this.pixelRatio = 1;
+    this.zoomSteps = 0;
   }
 
   show(id) {
@@ -74,7 +126,8 @@ export class ArmoryPreview {
         this.hide();
         return false;
       }
-      const bounds = new THREE.Box3().setFromObject(model.root);
+      const corners = armoryBoundsCorners(model.root);
+      const bounds = new THREE.Box3().setFromPoints(corners);
       const sphere = bounds.getBoundingSphere(new THREE.Sphere());
       if (bounds.isEmpty() || !Number.isFinite(sphere.radius) || sphere.radius <= 0) {
         model.dispose();
@@ -87,21 +140,15 @@ export class ArmoryPreview {
       this.model.root.position.sub(sphere.center);
       this.pivot.scale.setScalar(1 / sphere.radius);
       this.pivot.add(this.model.root);
-      this.boundsCorners.length = 0;
-      for (const x of [bounds.min.x, bounds.max.x]) {
-        for (const y of [bounds.min.y, bounds.max.y]) {
-          for (const z of [bounds.min.z, bounds.max.z]) {
-            this.boundsCorners.push(new THREE.Vector3(x, y, z)
-              .sub(sphere.center).multiplyScalar(1 / sphere.radius));
-          }
-        }
-      }
+      this.boundsCorners = corners;
+      for (const corner of corners) corner.sub(sphere.center).multiplyScalar(1 / sphere.radius);
       this.resetView();
     }
     this.active = true;
     this.canvas.hidden = this.contextLost;
     this.canvas.style.display = this.contextLost ? 'none' : 'block';
-    this.canvas.setAttribute('aria-label', `3D model of ${label}. Use arrow keys to rotate and Home to reset.`);
+    this.canvas.setAttribute('aria-label',
+      `3D model of ${label}. Use arrow keys to rotate, plus or minus to zoom, and Home to reset.`);
     this.queueRender();
     return !this.contextLost;
   }
@@ -127,13 +174,18 @@ export class ArmoryPreview {
   }
 
   resetView() {
-    const caseView = this.id === 'reserve-case';
-    const orb = Object.hasOwn(THROWABLES, this.id);
-    const pitch = caseView ? 0.44 : orb ? 0.25 : 0.17;
-    const yaw = caseView ? -0.36 : orb ? 0.62 : 1.22;
-    this.pivot.rotation.set(pitch, yaw, 0, 'YXZ');
+    setArmoryHomeRotation(this.pivot.rotation, this.id);
     this.homeRotation.copy(this.pivot.quaternion);
+    this.zoomSteps = 0;
     this.queueRender();
+  }
+
+  zoom(steps) {
+    if (!this.disposed && this.model && Number.isFinite(steps)) {
+      this.zoomSteps = THREE.MathUtils.clamp(this.zoomSteps + steps, 0, MAX_ZOOM_STEPS);
+      this.queueRender();
+    }
+    return ZOOM_INCREMENT ** this.zoomSteps;
   }
 
   ensureRenderer() {
@@ -152,10 +204,7 @@ export class ArmoryPreview {
       this.renderer = new THREE.WebGLRenderer({
         canvas, antialias: true, alpha: true, stencil: false, powerPreference: 'default',
       });
-      this.renderer.setClearColor(0x0e1720, 0);
-      this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      this.renderer.toneMappingExposure = 1.15;
+      configureArmoryRenderer(this.renderer);
       this.bakeEnvironment();
     } catch (error) {
       this.environment?.dispose();
@@ -182,18 +231,10 @@ export class ArmoryPreview {
   }
 
   bakeEnvironment() {
-    const room = new RoomEnvironment();
-    const generator = new THREE.PMREMGenerator(this.renderer);
-    try {
-      const next = generator.fromScene(room, 0.065);
-      this.environment?.dispose();
-      this.environment = next;
-      this.scene.environment = next.texture;
-      this.scene.environmentIntensity = 1.1;
-    } finally {
-      generator.dispose();
-      room.dispose();
-    }
+    const next = createArmoryEnvironment(this.renderer);
+    this.environment?.dispose();
+    this.environment = next;
+    this.scene.environment = next.texture;
   }
 
   installInput() {
@@ -220,12 +261,19 @@ export class ArmoryPreview {
         if (this.drag?.id === event.pointerId) this.stopDrag();
       }, options);
     }
+    canvas.addEventListener('wheel', (event) => {
+      if (!this.active || this.container.ownerDocument.activeElement !== canvas || !event.deltaY || event.ctrlKey) return;
+      this.zoom(-Math.sign(event.deltaY));
+      event.preventDefault();
+    }, { ...options, passive: false });
     canvas.addEventListener('keydown', (event) => {
       const yaw = event.key === 'ArrowLeft' ? -ROTATION_STEP
         : event.key === 'ArrowRight' ? ROTATION_STEP : 0;
       const pitch = event.key === 'ArrowUp' ? -ROTATION_STEP
         : event.key === 'ArrowDown' ? ROTATION_STEP : 0;
       if (event.key === 'Home') this.resetView();
+      else if (event.key === '+' || event.key === '=') this.zoom(1);
+      else if (event.key === '-') this.zoom(-1);
       else if (yaw || pitch) this.rotate(yaw, pitch);
       else return;
       event.preventDefault();
@@ -277,7 +325,7 @@ export class ArmoryPreview {
     const height = this.container.clientHeight;
     if (width < 2 || height < 2) return;
 
-    const pixelRatio = Math.min(this.window.devicePixelRatio || 1, 1.5,
+    const pixelRatio = Math.min(Math.max(this.window.devicePixelRatio || 1, 1.5), 2,
       Math.sqrt((960 * 680) / (width * height)));
     if (width !== this.width || height !== this.height || pixelRatio !== this.pixelRatio) {
       this.width = width;
@@ -285,15 +333,20 @@ export class ArmoryPreview {
       this.pixelRatio = pixelRatio;
       this.renderer.setPixelRatio(pixelRatio);
       this.renderer.setSize(width, height, false);
-      this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
+      this.camera.setViewOffset(width, height, 0, Math.min(8, height * 0.05), width, height);
     }
     const vertical = Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5));
     const horizontal = vertical * this.camera.aspect;
-    const preferred = this.fitDistance(this.homeRotation, horizontal * 0.625, vertical * 0.83);
-    const unclipped = this.fitDistance(this.pivot.quaternion, horizontal * 0.93, vertical * 0.9);
+    const safeHeight = THREE.MathUtils.clamp(1 - 48 / height, 0.45, 0.86);
+    const preferred = this.fitDistance(this.homeRotation, horizontal * 0.78, vertical * Math.min(0.78, safeHeight));
+    const unclipped = this.fitDistance(this.pivot.quaternion, horizontal * 0.93, vertical * safeHeight);
     this.camera.position.copy(CAMERA_DIRECTION).multiplyScalar(Math.max(preferred, unclipped));
     this.camera.lookAt(0, 0, 0);
+    const zoom = ZOOM_INCREMENT ** this.zoomSteps;
+    if (this.camera.zoom !== zoom) {
+      this.camera.zoom = zoom;
+      this.camera.updateProjectionMatrix();
+    }
     this.renderer.render(this.scene, this.camera);
   }
 

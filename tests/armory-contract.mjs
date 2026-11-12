@@ -73,6 +73,17 @@ export async function runBrowserArmoryContract(page) {
   }
   await armory.locator('[data-inspect="precision"]').click();
   assert.match(await inspector.locator('.cl-armory-facts').textContent(), /5 rounds/);
+  if (await inspector.getAttribute('data-preview') === 'model') {
+    const zoom = () => page.evaluate(() => window.__CINDERLINE__.ui.armory.preview.zoomSteps);
+    await armory.getByRole('button', { name: 'Zoom model in' }).click();
+    assert.equal(await zoom(), 1);
+    await armory.getByRole('button', { name: 'Zoom model out' }).click();
+    assert.equal(await zoom(), 0);
+    await armory.getByRole('button', { name: 'Zoom model in' }).click();
+    await armory.getByRole('button', { name: 'Reset view' }).click();
+    assert.equal(await zoom(), 0);
+    assert.deepEqual((await state()).economy, opening);
+  }
   await inspector.locator('[data-inspect-buy]').click();
   assert.equal(await inspector.getAttribute('data-inspected'), 'precision');
   assert.equal(await inspector.locator('[data-inspect-state]').textContent(), 'Equipped');

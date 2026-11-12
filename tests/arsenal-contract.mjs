@@ -74,6 +74,18 @@ export function runArsenalContract() {
     assert.equal(pistol.weapon.root.visible, false);
     pistol.weapon.equip();
     assert.equal(pistol.weapon.snapshot.action, 'draw');
+    tick(pistol.weapon, 20);
+    const hipPose = pistol.weapon.root.quaternion.clone();
+    pistol.context.input.KeyI = true;
+    tick(pistol.weapon, 24);
+    assert.equal(pistol.weapon.snapshot.action, 'inspect');
+    assert(pistol.weapon.root.quaternion.angleTo(hipPose) > 0.45);
+    assert.equal(pistol.weapon.magazine, 10);
+    pistol.context.input.KeyI = false;
+    pistol.context.input.fire = true;
+    tick(pistol.weapon, 1);
+    assert.equal(pistol.weapon.snapshot.action, 'idle');
+    assert.equal(pistol.weapon.magazine, 9, 'Inspection blocked the next trigger edge');
 
     precision.context.input.aim = true;
     tick(precision.weapon, 30);

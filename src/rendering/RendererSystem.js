@@ -124,7 +124,7 @@ export class RendererSystem {
     this.scene.environment = this.environment.texture;
     this.scene.environmentIntensity = 0.61;
     this.viewScene.environment = this.environment.texture;
-    this.viewScene.environmentIntensity = 0.68;
+    this.viewScene.environmentIntensity = 0.82;
     this.scene.add(this.sky);
     this.ash = createAshField();
     this.motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -155,14 +155,14 @@ export class RendererSystem {
     cloudFill.position.set(-34, 28, 14);
     this.scene.add(cloudFill);
 
-    const viewKey = new THREE.DirectionalLight(0xffdeb1, 2.9);
-    viewKey.position.set(-2.4, 3.6, 4.2);
-    const viewFill = new THREE.HemisphereLight(0xd2e4ff, 0x816c62, 1.62);
-    const viewRim = new THREE.DirectionalLight(0xb0cdff, 2.45);
+    const viewKey = new THREE.DirectionalLight(0xffe3c5, 3.35);
+    viewKey.position.set(-3.1, 4.6, 2.8);
+    const viewFill = new THREE.HemisphereLight(0xd2e4ff, 0x816c62, 1.24);
+    const viewRim = new THREE.DirectionalLight(0xb6d4ff, 2.65);
     viewRim.position.set(3.2, 1.4, -2.8);
-    const viewBounce = new THREE.DirectionalLight(0xe0a47f, 0.72);
+    const viewBounce = new THREE.DirectionalLight(0xe0a47f, 0.53);
     viewBounce.position.set(2.2, -1.1, 2.6);
-    const viewAmbient = new THREE.AmbientLight(0x9da9b2, 0.40);
+    const viewAmbient = new THREE.AmbientLight(0x9da9b2, 0.25);
     this.viewScene.add(viewKey, viewFill, viewRim, viewBounce, viewAmbient);
   }
 

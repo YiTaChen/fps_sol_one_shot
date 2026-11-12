@@ -148,6 +148,8 @@ export class Armory {
                 <button type="button" data-orbit="left" aria-label="Rotate model left">◀</button>
                 <button type="button" data-orbit="reset">Reset view</button>
                 <button type="button" data-orbit="right" aria-label="Rotate model right">▶</button>
+                <button type="button" data-zoom="out" aria-label="Zoom model out">−</button>
+                <button type="button" data-zoom="in" aria-label="Zoom model in">+</button>
               </div>
             </div>
             <div class="cl-armory-info">
@@ -223,6 +225,8 @@ export class Armory {
         this.preview.resetView();
       } else if (button.dataset.orbit) {
         this.preview.rotate(button.dataset.orbit === 'left' ? -Math.PI / 12 : Math.PI / 12);
+      } else if (button.dataset.zoom) {
+        this.preview.zoom(button.dataset.zoom === 'in' ? 1 : -1);
       }
     };
     this.root.addEventListener('click', this.click);

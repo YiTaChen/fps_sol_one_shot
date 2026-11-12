@@ -47,7 +47,7 @@ async function main() {
   const armory = runArmoryContract();
   pass('armory economy', `${armory.openingCredits} opening credits, owned gear, caps, and retry`);
   runArsenalContract();
-  pass('arsenal contract', 'six silhouettes, cadence, scope cycle, ammo, and obstructed melee');
+  pass('arsenal contract', 'six silhouettes, weapon inspection, cadence, scope cycle, ammo, and obstructed melee');
   runThrowablesContract();
   pass('throwable effects', 'flight, cover, haze sight, stasis, capacity, and reset');
   const server = await ensureServer();
@@ -513,7 +513,7 @@ async function main() {
     pass('short click and same-step aim', `yaw difference ${relay.yawError.toFixed(4)} rad`);
 
     await runBrowserArmoryContract(page);
-    pass('browser armory and combat', '10 item images, free inspection, purchases, shoulder equipment, scope, melee, and utility release');
+    pass('browser armory and combat', '10 item images, zoom, purchases, shoulder equipment, scope, melee, and utility release');
 
     const internalDiagnostics = await page.evaluate(
       () => window.__FPS_TEST__.diagnostics(),

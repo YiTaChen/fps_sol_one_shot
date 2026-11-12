@@ -418,6 +418,7 @@ export class UI {
             <div class="cl-control"><kbd>G</kbd><span>Send a decoy to the last powered relay</span></div>
             <div class="cl-control"><kbd>B</kbd><span>Open a secure armory locker</span></div>
             <div class="cl-control"><kbd>V</kbd><span>Toggle shoulder view</span></div>
+            <div class="cl-control"><kbd>I</kbd><span>Inspect equipped weapon</span></div>
             <div class="cl-control"><kbd>1 / 2 / 3</kbd><span>Primary, sidearm, melee</span></div>
             <div class="cl-control"><kbd>4 / 5 / 6 · T</kbd><span>Select a throwable · throw</span></div>
             <div class="cl-control"><kbd>Esc</kbd><span>Pause / release pointer lock</span></div>

@@ -655,13 +655,13 @@ export class Game {
 
   startThrow(id) {
     const item = this.enemies.sharedAssets.weapons.create(id);
+    this.rifle.holster();
     const hand = this.weaponInstances.get("vesper").rightSleeve.parent.clone(true);
     hand.position.set(0.068, -0.035, 0.033);
     hand.rotation.set(-0.74, 0.12, -0.62);
     this.throwView.add(item.root, hand);
     this.throwView.visible = true;
     this.pendingThrow = { id, elapsed: 0 };
-    this.rifle.holster();
     this.playerAvatar.setWeapon(id);
     this.updateThrowView();
   }
@@ -900,6 +900,7 @@ export class Game {
     const playing = this.state.phase === "playing";
     const canObserve = this.state.shoulderView && !this.captureOverride
       && (playing || this.state.phase === "paused" || this.state.phase === "armory")
+      && this.rifle.inspectRemaining === 0
       && !(this.rifle.options.scope && this.rifle.ads > 0.52);
     if (playing && (canObserve || this.pendingThrow)) {
       this.updatePlayerAvatar(Math.min(dt, 0.05), alpha);
