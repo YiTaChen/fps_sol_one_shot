@@ -7,6 +7,14 @@ const BLOCKED_KEYS = new Set([
   "KeyE",
   "KeyF",
   "KeyG",
+  "KeyB",
+  "KeyT",
+  "Digit1",
+  "Digit2",
+  "Digit3",
+  "Digit4",
+  "Digit5",
+  "Digit6",
   "KeyR",
   "KeyC",
   "ControlLeft",
@@ -181,6 +189,8 @@ export class InputManager {
       leanRight: "KeyE",
       interact: "KeyF",
       decoy: "KeyG",
+      armory: "KeyB",
+      throw: "KeyT",
     };
     const keys = record.keys ?? record;
     for (const [name, value] of Object.entries(keys)) {

@@ -501,7 +501,8 @@ export class Effects {
     DIRECTION.copy(direction).normalize();
     QUATERNION.setFromUnitVectors(NEG_Z_AXIS, DIRECTION);
     flash.group.quaternion.copy(QUATERNION);
-    const scale = 0.82 + randomFloat(this.rng) * 0.42;
+    const size = Number(data.flashScale) || 1;
+    const scale = (0.82 + randomFloat(this.rng) * 0.42) * size;
     flash.group.scale.setScalar(scale);
     flash.group.rotation.z += (randomFloat(this.rng) - 0.5) * 1.2;
 
@@ -510,7 +511,8 @@ export class Effects {
     lightSlot.age = 0;
     lightSlot.life = 0.095;
     lightSlot.light.position.copy(position);
-    lightSlot.light.intensity = 3.8;
+    lightSlot.strength = 3.8 * size;
+    lightSlot.light.intensity = lightSlot.strength;
     lightSlot.light.distance = 4.4;
 
     POINT.copy(position).addScaledVector(direction, 0.05);
@@ -838,7 +840,7 @@ export class Effects {
       if (!light.active) continue;
       light.age += dt;
       const fade = Math.max(0, 1 - light.age / light.life);
-      light.light.intensity = 3.8 * fade * fade;
+      light.light.intensity = light.strength * fade * fade;
       if (light.age >= light.life) {
         light.active = false;
         light.light.intensity = 0;

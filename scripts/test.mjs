@@ -17,6 +17,9 @@ import { runPhysicsStepContract } from '../tests/physics-step-contract.mjs';
 import { runProgressionContract } from '../tests/progression-contract.mjs';
 import { runRelayAndInputContract } from '../tests/relay-and-input-contract.mjs';
 import { runDistrictRouteContract } from '../tests/district-route-contract.mjs';
+import { runArmoryContract, runBrowserArmoryContract } from '../tests/armory-contract.mjs';
+import { runThrowablesContract } from '../tests/throwables-contract.mjs';
+import { runArsenalContract } from '../tests/arsenal-contract.mjs';
 
 const results = [];
 const startedAt = performance.now();
@@ -41,6 +44,12 @@ async function main() {
     'local progression contract',
     `validated through operation ${progressionContract.maximumLevel}`,
   );
+  const armory = runArmoryContract();
+  pass('armory economy', `${armory.openingCredits} opening credits, owned gear, caps, and retry`);
+  runArsenalContract();
+  pass('arsenal contract', 'six silhouettes, cadence, scope cycle, ammo, and obstructed melee');
+  runThrowablesContract();
+  pass('throwable effects', 'flight, cover, haze sight, stasis, capacity, and reset');
   const server = await ensureServer();
   let browser;
   try {
@@ -502,6 +511,9 @@ async function main() {
     pass('relay route and extraction', '3 relays, early exit, damage, pause, replay');
     pass('staged power and signal decoy', '3 power stages, one pulse, pause and replay');
     pass('short click and same-step aim', `yaw difference ${relay.yawError.toFixed(4)} rad`);
+
+    await runBrowserArmoryContract(page);
+    pass('browser armory and combat', 'purchase, credits, scope, reload-free switching, melee, and throwing');
 
     const internalDiagnostics = await page.evaluate(
       () => window.__FPS_TEST__.diagnostics(),

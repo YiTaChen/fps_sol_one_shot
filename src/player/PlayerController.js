@@ -484,9 +484,13 @@ export class PlayerController {
     if (!this.enabled || !this.alive) return;
     readLook(this.input, this._lookDelta);
     if (!this._lookDelta.x && !this._lookDelta.y) return;
-    const aiming = this.input?.buttonDown?.(2) && !this.context?.state?.weapon?.reloading;
+    const weapon = this.context?.state?.weapon;
+    const aiming = this.input?.buttonDown?.(2) && !weapon?.reloading && !weapon?.melee;
+    const scopeScale = aiming && weapon?.scope
+      ? THREE.MathUtils.lerp(1, 0.43, weapon.ads ?? 0)
+      : 1;
     const sensitivity = this.options.lookSensitivity * this.sensitivity
-      * (aiming ? this.adsSensitivity : 1);
+      * (aiming ? this.adsSensitivity * scopeScale : 1);
     this.yaw -= this._lookDelta.x * sensitivity;
     this.pitch -= this._lookDelta.y * sensitivity;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -Math.PI * 0.475, Math.PI * 0.475);
@@ -559,7 +563,10 @@ export class PlayerController {
         this.sliding = false;
       }
     } else {
-      const wantsSprint = sprintDown && moveY > 0.35 && !crouchDown && this.grounded;
+      const weapon = this.context?.state?.weapon;
+      const aimWeight = weapon?.scope ? (weapon.ads ?? 0) : 0;
+      const mobility = (weapon?.mobility ?? 1) * (1 - 0.28 * aimWeight);
+      const wantsSprint = sprintDown && moveY > 0.35 && !crouchDown && this.grounded && aimWeight < 0.5;
       this.sprinting = wantsSprint;
       const targetSpeed = crouchDown
         ? this.options.crouchSpeed
@@ -572,8 +579,8 @@ export class PlayerController {
           ? this.options.groundAcceleration
           : this.options.groundDeceleration
         : this.options.airAcceleration;
-      const targetX = WISH.x * targetSpeed;
-      const targetZ = WISH.z * targetSpeed;
+      const targetX = WISH.x * targetSpeed * mobility;
+      const targetZ = WISH.z * targetSpeed * mobility;
       this.velocity.x = moveToward(this.velocity.x, targetX, acceleration * dt);
       this.velocity.z = moveToward(this.velocity.z, targetZ, acceleration * dt);
     }

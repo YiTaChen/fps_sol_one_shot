@@ -239,6 +239,8 @@ export class EnemyDirector {
     this.state = null;
     this.player = options.player ?? null;
     this.getPlayerSnapshot = options.getPlayerSnapshot ?? null;
+    this.visionOccluded = options.visionOccluded ?? null;
+    this.isStunned = options.isStunned ?? null;
     this.enemyCount = Math.max(1, Math.floor(options.count ?? 7));
     this.activeLimit = Math.max(1, Math.floor(options.activeLimit ?? ACTIVE_ENEMY_LIMIT));
     this.totalCount = this.enemyCount;
@@ -693,6 +695,15 @@ export class EnemyDirector {
         continue;
       }
       if (!combatActive) continue;
+      if (this.isStunned?.(enemy.id)) {
+        enemy.renderMotion = 0;
+        enemy.renderAim = 0;
+        enemy.renderFire = false;
+        enemy.canSeePlayer = false;
+        enemy.perceptionTimer = 0;
+        this._keepFeetGrounded(enemy, dt);
+        continue;
+      }
 
       enemy.stateTime += dt;
       enemy.perceptionTimer -= dt;
@@ -727,9 +738,15 @@ export class EnemyDirector {
 
   update(dt) {
     if (!this.context || dt <= 0) return;
+    const highQuality = this.context.quality?.name === 'high';
+    const detailDistance = highQuality ? 21 : 12;
+    const camera = this.context.camera;
+    const capture = this.state?.phase === 'capture';
     for (let i = 0; i < this.enemies.length; i += 1) {
       const enemy = this.enemies[i];
       if (enemy.despawned) continue;
+      const near = capture || !camera || enemy.rig.root.position.distanceToSquared(camera.position) < detailDistance ** 2;
+      enemy.rig.setRenderDetail?.(near, highQuality || capture);
       enemy.rig.animate(
         Math.min(dt, 1 / 20),
         enemy.renderMotion,
@@ -820,6 +837,7 @@ export class EnemyDirector {
   }
 
   _lineOfSight(origin, target) {
+    if (this.visionOccluded?.(origin, target)) return false;
     tmpDirection.subVectors(target, origin);
     const fullDistance = tmpDirection.length();
     if (fullDistance < 0.05) return true;

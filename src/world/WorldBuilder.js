@@ -392,6 +392,7 @@ export class WorldBuilder {
     this.buildArchitecture(layoutRng);
     this.dressInteriors(dressingRng);
     this.placeHeroProps();
+    this.placeDeploymentLocker();
     this.placeRepeatedStreetDressing(dressingRng);
     this.scatterInstancedDetails(dressingRng);
     this.districtRoute = new DistrictRoute(this);
@@ -964,6 +965,48 @@ export class WorldBuilder {
     }
   }
 
+  placeDeploymentLocker() {
+    const x = -46.75;
+    const z = -1.92;
+    this.props.place('tool-cabinet', new THREE.Vector3(x, 0.02, z), Math.PI * 0.5, 1.22);
+    this.batcher.box(
+      'lamp',
+      _position.set(x + 0.19, 1.17, z),
+      _quaternion.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.PI * 0.5),
+      _scale.set(0.41, 0.065, 0.06),
+      { name: 'deployment-locker-signal', receiveShadow: false },
+    );
+
+    const canvas = globalThis.document?.createElement('canvas');
+    if (!canvas) return;
+    canvas.width = 384;
+    canvas.height = 120;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#172930';
+    ctx.fillRect(0, 0, 384, 120);
+    ctx.strokeStyle = '#84bcc1';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(5, 5, 374, 110);
+    ctx.fillStyle = '#96dbe0';
+    ctx.font = '700 44px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('ARMORY', 192, 58);
+    ctx.font = '700 22px monospace';
+    ctx.fillText('B  ·  OPEN LOCKER', 192, 91);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    this.deploymentSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.67, 0.21),
+      new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }),
+    );
+    this.deploymentSign.name = 'Deployment locker sign';
+    this.deploymentSign.rotation.y = Math.PI * 0.5;
+    this.deploymentSign.position.set(x + 0.36, 1.39, z);
+    this.root.add(this.deploymentSign);
+  }
+
   placeRepeatedStreetDressing(rng) {
     for (let index = 0; index < 12; index += 1) {
       const side = index & 1 ? -1 : 1;
@@ -1218,6 +1261,12 @@ export class WorldBuilder {
 
     this.root.removeFromParent();
     this.districtRoute?.dispose();
+    if (this.deploymentSign) {
+      this.deploymentSign.material.map.dispose();
+      this.deploymentSign.material.dispose();
+      this.deploymentSign.geometry.dispose();
+      this.deploymentSign = null;
+    }
     for (const gate of this.poweredShutters) {
       gate.indicatorMaterial.dispose();
       gate.shutterMaterial.dispose();

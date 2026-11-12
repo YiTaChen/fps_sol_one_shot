@@ -1,3 +1,5 @@
+import { ARMORY_STYLES, Armory } from "./Armory.js";
+
 const CONTROL_FIELDS = `
   <h2 class="cl-setting-heading">Aim and camera</h2>
   <label class="cl-setting"><span>Mouse speed <output data-control-value="sensitivity"></output></span>
@@ -12,6 +14,7 @@ const CONTROL_FIELDS = `
 const UI_STYLE_ID = 'cinderline-ui-styles';
 
 const UI_STYLES = `
+${ARMORY_STYLES}
 :root {
   --cl-ink: #e9eee6;
   --cl-muted: #aab6ad;
@@ -188,6 +191,38 @@ const UI_STYLES = `
 .cl-health-label span { display:block; color:var(--cl-muted); font-size:9px; }
 .cl-health-label b { display:block; margin-top:4px; font-size:10px; letter-spacing:.16em; }
 .cl-bottom-right { position:absolute; right:32px; bottom:28px; text-align:right; }
+.cl-armory-hud { position:absolute; top:28px; left:30px; color:#e9c88d; text-shadow:0 2px 6px #000; }
+.cl-armory-hud b { font-size:18px; letter-spacing:.03em; }
+.cl-armory-hud span { display:block; margin-top:3px; color:#d3d9d2; font-size:9px; }
+.cl-kitbar { display:flex; justify-content:flex-end; gap:5px; margin-bottom:10px; }
+.cl-kitbar i {
+  display:grid; place-items:center; width:21px; height:20px; color:#c6d0d1;
+  background:rgba(8,15,19,.7); border:1px solid #374c50; font:700 9px Arial,sans-serif;
+}
+.cl-kitbar i.is-equipped { color:#1d2524; background:#e2b977; border-color:#e2b977; }
+.cl-utility-hud {
+  position:absolute; left:50%; bottom:38px; transform:translateX(-50%);
+  display:flex; align-items:center; gap:5px; color:#e6eae4; font-size:10px;
+}
+.cl-utility-hud[hidden] { display:none; }
+.cl-utility-hud span { background:rgba(10,19,24,.83); padding:5px 7px; border:1px solid #354a4e; }
+.cl-utility-hud span.is-selected { color:#abebed; border-color:#6caeb4; }
+.cl-utility-hud kbd { font-size:9px; color:#e3bd7d; }
+.cl-scope {
+  position:absolute; inset:0; opacity:0; transition:opacity .1s; pointer-events:none;
+  background:radial-gradient(circle at center, transparent 0 33vmin, rgba(2,4,5,.36) 34vmin, #020405 36vmin);
+}
+.cl-scope.is-active { opacity:1; }
+.cl-scope::before,.cl-scope::after {
+  content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  background:#0b1112; box-shadow:0 0 1px #e4f6f0;
+}
+.cl-scope::before { width:66vmin; height:1px; }
+.cl-scope::after { width:1px; height:66vmin; }
+.cl-scope-dot {
+  position:absolute; left:50%; top:50%; width:3px; height:3px;
+  transform:translate(-50%,-50%); border-radius:50%; background:#fcd199; box-shadow:0 0 4px #fce6bb;
+}
 .cl-weapon-name { color:var(--cl-muted); font-size:9px; margin-bottom:3px; }
 .cl-ammo { display:flex; justify-content:flex-end; align-items:baseline; gap:9px; text-shadow:0 2px 8px #000; }
 .cl-ammo-current { font:900 48px/.85 Arial,sans-serif; letter-spacing:-.07em; }
@@ -249,7 +284,8 @@ const UI_STYLES = `
   .cl-panel { padding:30px 0; } .cl-controls { display:none; } .cl-pause .cl-controls { display:block; }
   .cl-start .cl-panel { grid-template-columns:1fr; }
   .cl-start .cl-controls { display:block; max-width:340px; }
-  .cl-decoy { left:18px; }
+  .cl-decoy { left:18px; } .cl-armory-hud { top:80px; left:18px; }
+  .cl-utility-hud { bottom:76px; font-size:8px; }
   .cl-bottom-left{left:18px}.cl-bottom-right{right:18px} .cl-topbar{width:min(94vw,560px)}
 }
 `;
@@ -367,6 +403,7 @@ export class UI {
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="start">Deploy</button>
               <button class="cl-btn" data-action="sweep">Endless sweep</button>
+              <button class="cl-btn" data-action="armory-deploy">Armory</button>
             </div>
           </div>
           <details class="cl-controls">
@@ -379,6 +416,9 @@ export class UI {
             <div class="cl-control"><kbd>Q · E</kbd><span>Lean left · right</span></div>
             <div class="cl-control"><kbd>Hold F</kbd><span>Operate a relay or extract</span></div>
             <div class="cl-control"><kbd>G</kbd><span>Send a decoy to the last powered relay</span></div>
+            <div class="cl-control"><kbd>B</kbd><span>Open a secure armory locker</span></div>
+            <div class="cl-control"><kbd>1 / 2 / 3</kbd><span>Primary, sidearm, melee</span></div>
+            <div class="cl-control"><kbd>4 / 5 / 6 · T</kbd><span>Select a throwable · throw</span></div>
             <div class="cl-control"><kbd>Esc</kbd><span>Pause / release pointer lock</span></div>
             <h2 style="margin-top:22px">Render profile</h2>
             <div class="cl-quality" role="group" aria-label="Graphics quality">
@@ -421,6 +461,7 @@ export class UI {
             <div class="cl-status-data">
               <div class="cl-stat"><strong data-result-kills>0</strong><span>Hostiles</span></div>
               <div class="cl-stat"><strong data-result-time>00:00</strong><span>Elapsed</span></div>
+              <div class="cl-stat"><strong data-result-credits>0</strong><span>Credits earned</span></div>
             </div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="next-level">Next operation</button>
@@ -438,6 +479,7 @@ export class UI {
             <div class="cl-status-data">
               <div class="cl-stat"><strong data-result-kills>0</strong><span>Neutralized</span></div>
               <div class="cl-stat"><strong data-result-time>00:00</strong><span>Elapsed</span></div>
+              <div class="cl-stat"><strong data-result-credits>0</strong><span>Credits earned</span></div>
             </div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="restart">Redeploy</button>
@@ -447,6 +489,8 @@ export class UI {
         </div>
       </section>
       <div class="cl-hud is-hidden" aria-label="Heads up display">
+        <div class="cl-scope" aria-hidden="true"><i class="cl-scope-dot"></i></div>
+        <div class="cl-armory-hud"><b data-field-credits></b><span data-locker-hint>B · Armory</span></div>
         <div class="cl-topbar">
           <div class="cl-compass"><span data-cardinal>N</span><span class="cl-heading" data-heading>000</span></div>
           <div class="cl-objective"><span class="cl-operation">Operation <b data-level>1</b></span><i></i><span data-objective-name>Neutralize hostiles</span><b data-sweep-progress><span data-kills>0</span> / <span data-required>7</span></b><b data-relay-progress hidden>0 / 3</b></div>
@@ -458,7 +502,18 @@ export class UI {
           <div class="cl-health-mark" style="--health-angle:360deg"><span class="cl-health-value" data-health>100</span></div>
           <div class="cl-health-label"><span>Condition</span><b data-condition>Operational</b></div>
         </div>
+        <div class="cl-utility-hud" hidden>
+          <span data-pouch="pulse"><kbd>4</kbd> Pulse <b></b></span>
+          <span data-pouch="haze"><kbd>5</kbd> Haze <b></b></span>
+          <span data-pouch="stasis"><kbd>6</kbd> Stasis <b></b></span>
+          <kbd>T · Throw</kbd>
+        </div>
         <div class="cl-bottom-right">
+          <div class="cl-kitbar" aria-label="Weapon slots">
+            <i data-weapon-slot="primary" aria-label="Primary">1</i>
+            <i data-weapon-slot="secondary" aria-label="Sidearm">2</i>
+            <i data-weapon-slot="melee" aria-label="Melee">3</i>
+          </div>
           <div class="cl-weapon-name" data-weapon-name>CR-27 Vesper</div>
           <div class="cl-ammo"><span class="cl-ammo-current" data-magazine>30</span><span class="cl-ammo-divider">/</span><span class="cl-ammo-reserve" data-reserve>120</span></div>
           <div class="cl-reload" data-reload></div>
@@ -477,11 +532,19 @@ export class UI {
         <div class="cl-pause-tip">Esc · pause</div>
       </div>
     `;
+    this.armory = new Armory(this.root, this.context.assets.armory, this.events);
     (this.options.container ?? document.body).appendChild(this.root);
 
     const query = (selector) => this.root.querySelector(selector);
     this.nodes.hud = query('.cl-hud');
     this.nodes.crosshair = query('.cl-crosshair');
+    this.nodes.scope = query('.cl-scope');
+    this.nodes.ammoDisplay = query('.cl-ammo');
+    this.nodes.fieldCredits = query('[data-field-credits]');
+    this.nodes.lockerHint = query('[data-locker-hint]');
+    this.nodes.utility = query('.cl-utility-hud');
+    this.nodes.pouches = [...this.root.querySelectorAll('[data-pouch]')].map((node) => ({ node, count: node.querySelector('b') }));
+    this.nodes.slots = [...this.root.querySelectorAll('[data-weapon-slot]')];
     this.nodes.hitmarker = query('.cl-hitmarker');
     this.nodes.damageRing = query('.cl-damage-ring');
     this.nodes.damageVignette = query('.cl-damage-vignette');
@@ -555,6 +618,16 @@ export class UI {
   _bindEvents() {
     this.unsubscribers.push(
       subscribe(this.events, 'game:start', () => this.setScreen('playing')),
+      subscribe(this.events, 'armory:opened', ({ location, opening }) => {
+        this.setScreen('armory');
+        this.armory.open(location, opening);
+      }),
+      subscribe(this.events, 'armory:closed', () => this.setScreen('playing')),
+      subscribe(this.events, 'armory:changed', ({ message }) => this.armory.update(message)),
+      subscribe(this.events, 'weapon:changed', () => {
+        this._text('reload', '');
+        this.crosshairKick = 0;
+      }),
       subscribe(this.events, 'game:pause', ({ source } = {}) => {
         this.nodes.pauseMessage.textContent = source === 'pointer-lock-unavailable'
           ? 'Mouse capture failed. Click Resume to try again.'
@@ -579,16 +652,6 @@ export class UI {
           this.crosshairKick = Math.min(14, this.crosshairKick + 4.5);
         }
       }),
-      subscribe(this.events, 'weapon:reload-start', () => {
-        this.nodes.reload.textContent = 'Reloading';
-      }),
-      subscribe(this.events, 'weapon:reload-phase', (data) => {
-        const phase = String(data?.phase ?? '').replaceAll('-', ' ');
-        this.nodes.reload.textContent = phase || 'Reloading';
-      }),
-      subscribe(this.events, 'weapon:reload-complete', () => {
-        this.nodes.reload.textContent = '';
-      }),
       subscribe(this.events, 'combat:hitmarker', (data) => this._showHitmarker(data)),
       subscribe(this.events, 'combat:kill', (data) => this._showKill(data)),
       subscribe(this.events, 'ui:announce', (data) => {
@@ -598,9 +661,11 @@ export class UI {
   }
 
   _action(action) {
-    if (action === 'start' || action === 'sweep') {
-      emit(this.events, 'game:start', { source: 'ui', mode: action === 'start' ? 'relay' : 'sweep' });
+    if (action === 'start' || action === 'sweep' || action === 'armory-deploy') {
+      emit(this.events, 'game:start', { source: 'ui', mode: action === 'sweep' ? 'sweep' : 'relay', armory: action === 'armory-deploy' });
       emit(this.events, 'audio:play', { name: 'ui-confirm' });
+    } else if (action === 'armory-close') {
+      emit(this.events, 'armory:close');
     } else if (action === 'menu') {
       emit(this.events, 'game:menu', { source: 'ui' });
     } else if (action === 'resume') {
@@ -642,6 +707,7 @@ export class UI {
       const elapsed = Number(data?.elapsed ?? this.last.elapsed ?? 0);
       screen.querySelector('[data-result-kills]').textContent = String(kills);
       screen.querySelector('[data-result-time]').textContent = this._formatTime(elapsed);
+      screen.querySelector('[data-result-credits]').textContent = String(data?.economy?.earned ?? 0);
       if (canonical === 'victory') {
         const relay = data?.mode === 'relay';
         screen.querySelector('[data-action="next-level"]').hidden = relay;
@@ -696,6 +762,7 @@ export class UI {
     this._text('level', level);
     this._updateProgression(state);
     if (weapon.name) this._text('weaponName', weapon.name);
+    this._renderEquipment(state, weapon);
     this.last.kills = kills;
     this.last.elapsed = elapsed;
     this.nodes.healthMark.style.setProperty('--health-angle', `${health * 3.6}deg`);
@@ -707,6 +774,7 @@ export class UI {
     this.nodes.condition.style.color = health <= 30 ? 'var(--cl-alert)' : '';
     this.nodes.crosshair.style.setProperty('--spread', `${spread.toFixed(1)}px`);
     this.nodes.crosshair.classList.toggle('is-ads', ads);
+    this.nodes.crosshair.hidden = Boolean(weapon.scoped);
 
     let degrees = ((-yaw * 180 / Math.PI) % 360 + 360) % 360;
     if (Math.abs(degrees - 360) < 0.5) degrees = 0;
@@ -732,6 +800,31 @@ export class UI {
         this.damageArcs.splice(i, 1);
       }
     }
+  }
+
+  _renderEquipment(state, weapon) {
+    this.nodes.scope.classList.toggle('is-active', Boolean(weapon.scoped));
+    this.nodes.ammoDisplay.hidden = Boolean(weapon.melee);
+    const equipment = state.economy;
+    if (!equipment) return;
+    this._text('fieldCredits', `${equipment.credits.toLocaleString('en-US')} CR`);
+    this.nodes.lockerHint.hidden = !state.armoryAvailable;
+    for (const node of this.nodes.slots) {
+      node.classList.toggle('is-equipped', node.dataset.weaponSlot === state.equippedSlot);
+    }
+    let anyUtility = false;
+    for (const { node, count } of this.nodes.pouches) {
+      const available = equipment.supplies[node.dataset.pouch] ?? 0;
+      const selected = node.dataset.pouch === state.throwable;
+      if (available > 0) anyUtility = true;
+      node.classList.toggle('is-selected', selected);
+      count.textContent = String(available);
+    }
+    this.nodes.utility.hidden = !anyUtility;
+    const action = weapon.reloading ? 'Reloading'
+      : weapon.action === 'draw' ? 'Equipping'
+        : weapon.action === 'bolt' ? 'Cycling' : '';
+    this._text('reload', action);
   }
 
   _renderMission(mission, player, yaw) {
@@ -857,6 +950,7 @@ export class UI {
   }
 
   dispose() {
+    this.armory?.dispose();
     if (this.disposed) return;
     this.disposed = true;
     for (let i = this.unsubscribers.length - 1; i >= 0; i -= 1) {

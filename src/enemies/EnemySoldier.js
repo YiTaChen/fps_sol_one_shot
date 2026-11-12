@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { createEnemyWardrobeGeometries, UNIFORMS } from './EnemyWardrobe.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const DOWN = new THREE.Vector3(0, -1, 0);
@@ -234,7 +235,7 @@ function clothLimbGeometry(
     for (let segment = 0; segment < radialSegments; segment += 1) {
       const a = ring * ringSize + segment;
       const b = a + ringSize;
-      indices.push(a, b, a + 1, b, b + 1, a + 1);
+      indices.push(a, a + 1, b, b, a + 1, b + 1);
     }
   }
 
@@ -323,17 +324,17 @@ function makeNoiseTexture(seed = 0x6d2b79f5, size = 128) {
     state ^= state << 13;
     state ^= state >>> 17;
     state ^= state << 5;
-    const grain = 188 + ((state >>> 26) & 31);
+    const grain = 207 + ((state >>> 26) & 31);
     const warp = Math.round(
-      15 * Math.sin((i % size) * 0.63) +
-      11 * Math.sin(Math.floor(i / size) * 0.47),
+      4 * Math.sin((i % size) * Math.PI * 20 / size) +
+      3 * Math.sin(Math.floor(i / size) * Math.PI * 30 / size),
     );
     values[i] = Math.max(126, Math.min(235, grain + warp));
   }
   for (let i = 0; i < values.length; i += 1) {
     const x = i % size;
     const y = Math.floor(i / size);
-    const edgeWear = (x % 17 === 0 || y % 23 === 0) ? 16 : 0;
+    const edgeWear = (x % 17 === 0 || y % 23 === 0) ? 5 : 0;
     const v = Math.min(255, values[i] + edgeWear);
     const j = i * 4;
     data[j] = v;
@@ -345,7 +346,30 @@ function makeNoiseTexture(seed = 0x6d2b79f5, size = 128) {
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(3, 3);
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function makeContactShadowMap() {
+  const size = 32;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const radius = Math.hypot(2 * x / (size - 1) - 1, 2 * y / (size - 1) - 1);
+      const offset = (y * size + x) * 4;
+      data[offset] = 255;
+      data[offset + 1] = 255;
+      data[offset + 2] = 255;
+      data[offset + 3] = 255 * (1 - THREE.MathUtils.smoothstep(radius, 0.15, 0.99));
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
   return texture;
 }
@@ -423,22 +447,26 @@ export function createEnemySharedAssets() {
   hardRoughness.colorSpace = THREE.NoColorSpace;
   hardRoughness.repeat.set(5, 5);
 
-  const palettes = [
-    { cloth: 0x69735e, clothDark: 0x333b34, armour: 0x454c42, accent: 0x9a7c4d },
-    { cloth: 0x716454, clothDark: 0x39342f, armour: 0x4d5044, accent: 0x90754f },
-    { cloth: 0x5d696d, clothDark: 0x31383b, armour: 0x41494b, accent: 0x7e8666 },
-    { cloth: 0x756f5d, clothDark: 0x3b3c35, armour: 0x4a4f42, accent: 0x947650 },
-  ].map((colors) => ({
+  const contactMap = makeContactShadowMap();
+  const palettes = UNIFORMS.map((colors) => ({
     cloth: material(colors.cloth, 0.88, 0.01, fabricMap, { roughnessMap: fabricRoughness }),
     clothDark: material(colors.clothDark, 0.91, 0, fabricMap, { roughnessMap: fabricRoughness }),
-    armour: material(colors.armour, 0.66, 0.1, polymerMap, { roughnessMap: hardRoughness }),
-    accent: material(colors.accent, 0.82, 0.02, fabricMap, { roughnessMap: fabricRoughness }),
+    armour: material(colors.armour, 0.64, 0.12, polymerMap, { roughnessMap: hardRoughness }),
+    accent: material(colors.textile, 0.87, 0.02, fabricMap, { roughnessMap: fabricRoughness }),
+    shell: material(colors.shell, 0.49, 0.18, polymerMap, { roughnessMap: hardRoughness }),
+    visor: new THREE.MeshPhysicalMaterial({
+      color: colors.lens, roughness: 0.18, metalness: 0.46, clearcoat: 0.86,
+      clearcoatRoughness: 0.11, envMapIntensity: 1.7,
+      emissive: colors.lensLight, emissiveIntensity: 0.033,
+    }),
+    signal: material(colors.stripe, 0.52, 0.09, null, {
+      emissive: colors.stripe, emissiveIntensity: 0.11,
+    }),
   }));
 
   const sharedMaterials = {
-    skin: material(0x8d6954, 0.82, 0, fabricMap, { roughnessMap: fabricRoughness }),
     glove: material(0x2a302c, 0.78, 0.01, polymerMap, { roughnessMap: hardRoughness }),
-    boot: material(0x222724, 0.7, 0.02, polymerMap, { roughnessMap: hardRoughness }),
+    boot: material(0x353c3b, 0.67, 0.02, polymerMap, { roughnessMap: hardRoughness }),
     weapon: material(0x242929, 0.38, 0.68, polymerMap, { roughnessMap: hardRoughness }),
     weaponEdge: material(0x68706c, 0.26, 0.84, polymerMap, { roughnessMap: hardRoughness }),
     optic: material(0x183536, 0.12, 0.1, null, {
@@ -507,7 +535,13 @@ export function createEnemySharedAssets() {
       fold: 0.05,
       seam: 0.058,
     }),
-    hand: new RoundedBoxGeometry(0.115, 0.115, 0.078, 3, 0.027),
+    hand: loftedBodyGeometry([
+      [-0.055, 0.037, 0.025, 0, -0.015],
+      [-0.030, 0.052, 0.036, 0, -0.009],
+      [0.014, 0.055, 0.036],
+      [0.045, 0.041, 0.030],
+      [0.061, 0.034, 0.026],
+    ], { radialSegments: 12, contour: 0.045 }),
     finger: new THREE.CapsuleGeometry(0.013, 0.043, 3, 7),
     fingerTip: new THREE.CapsuleGeometry(0.0115, 0.032, 3, 7),
     thumb: new THREE.CapsuleGeometry(0.016, 0.052, 3, 7),
@@ -541,11 +575,7 @@ export function createEnemySharedAssets() {
       [-0.017, 0.158, 0.143],
       [0.017, 0.158, 0.143],
     ], { radialSegments: 18, contour: 0.015 }),
-    helmetMount: new RoundedBoxGeometry(0.062, 0.062, 0.03, 2, 0.009),
     helmetRail: new RoundedBoxGeometry(0.039, 0.07, 0.115, 2, 0.011),
-    faceMask: new RoundedBoxGeometry(0.2, 0.092, 0.06, 3, 0.022),
-    goggleFrame: new RoundedBoxGeometry(0.21, 0.069, 0.044, 3, 0.019),
-    goggleLens: new RoundedBoxGeometry(0.074, 0.038, 0.011, 2, 0.007),
     collar: loftedBodyGeometry([
       [-0.055, 0.105, 0.095],
       [0.035, 0.125, 0.105],
@@ -577,7 +607,6 @@ export function createEnemySharedAssets() {
       [-0.19, 0.026, 0.101, 0.022],
       [-0.245, 0.029, 0.082, 0.025],
     ], 12),
-    kneepad: new RoundedBoxGeometry(0.13, 0.15, 0.055, 2, 0.025),
     rifleReceiver: sideProfileGeometry([
       [-0.23, 0.06],
       [0.17, 0.072],
@@ -651,26 +680,43 @@ export function createEnemySharedAssets() {
     rifleVent: new RoundedBoxGeometry(0.11, 0.01, 0.031, 1, 0.003),
   };
 
+  const lowerSleeve = geometries.limbLower;
+  const sleeveGusset = new THREE.SphereGeometry(0.079, 12, 8);
+  geometries.limbLower = mergeGeometryParts([
+    { geometry: lowerSleeve },
+    { geometry: sleeveGusset, position: [0, 0.171, 0], scale: [1, 0.84, 0.92] },
+  ]);
+  lowerSleeve.dispose();
+  sleeveGusset.dispose();
+
   const ownedMaterials = [
     ...palettes.flatMap((entry) => Object.values(entry)),
     ...Object.values(sharedMaterials),
   ];
+  const wardrobe = createEnemyWardrobeGeometries(geometries, mergeGeometryParts);
 
   return {
     fabricMap,
     polymerMap,
     fabricRoughness,
     hardRoughness,
+    contactMap,
     palettes,
     materials: sharedMaterials,
     geometries,
+    wardrobe,
     dispose() {
       Object.values(geometries).forEach((geometry) => geometry.dispose());
+      wardrobe.roles.forEach((role) => Object.values(role).forEach((geometry) => geometry.dispose()));
+      wardrobe.shoulderPlate.dispose();
+      wardrobe.kneePlate.dispose();
+      wardrobe.padMark.dispose();
       ownedMaterials.forEach((value) => value.dispose());
       fabricMap.dispose();
       polymerMap.dispose();
       fabricRoughness.dispose();
       hardRoughness.dispose();
+      contactMap.dispose();
     },
   };
 }
@@ -742,14 +788,43 @@ function createRifle(assets, enemyId) {
   return rifle;
 }
 
+function animateLeg(leg, side, stride, motion, aim, hipHeight) {
+  const phase = (stride / (Math.PI * 2) + (side > 0 ? 0.5 : 0)) % 1;
+  const support = 0.59;
+  const swing = Math.max(0, (phase - support) / (1 - support));
+  const reach = motion * 0.27;
+  const travel = phase < support
+    ? THREE.MathUtils.lerp(-reach, reach, phase / support)
+    : THREE.MathUtils.lerp(reach, -reach, THREE.MathUtils.smoothstep(swing, 0, 1));
+  const lift = Math.sin(swing * Math.PI) * motion * 0.116;
+  const targetZ = travel + aim * (side < 0 ? -0.071 : 0.085);
+  const drop = hipHeight - 0.078 - lift;
+  const upper = 0.425;
+  const shin = 0.397;
+  const distance = Math.min(upper + shin - 0.0001, Math.hypot(drop, targetZ));
+  const hipTriangle = THREE.MathUtils.clamp((upper ** 2 + distance ** 2 - shin ** 2) / (2 * upper * distance), -1, 1);
+  const kneeTriangle = THREE.MathUtils.clamp((distance ** 2 - upper ** 2 - shin ** 2) / (2 * upper * shin), -1, 1);
+  const hipPitch = Math.atan2(-targetZ, drop) + Math.acos(hipTriangle);
+  const kneePitch = -Math.acos(kneeTriangle);
+  const toeRoll = Math.sin(swing * Math.PI * 2) * motion * 0.15;
+  leg.upperPivot.position.set(side * (0.125 + aim * 0.011), hipHeight, 0);
+  leg.upperPivot.rotation.set(hipPitch, -side * (0.038 + aim * 0.064), side * 0.016);
+  leg.knee.rotation.set(kneePitch, 0, 0);
+  leg.ankle.rotation.set(-hipPitch - kneePitch + toeRoll, 0, -side * 0.016);
+}
+
 export function createEnemySoldier(id, visualVariant, assets) {
-  const palette = assets.palettes[visualVariant % assets.palettes.length];
+  const uniformIndex = ((visualVariant % UNIFORMS.length) + UNIFORMS.length) % UNIFORMS.length;
+  const uniform = UNIFORMS[uniformIndex];
+  const palette = assets.palettes[uniformIndex];
+  const gear = assets.wardrobe.roles[uniformIndex];
   const geometry = assets.geometries;
   const materials = assets.materials;
   const root = new THREE.Group();
   root.name = `enemy-soldier-${id}`;
   root.userData.enemyId = id;
   root.userData.enemyRoot = true;
+  root.userData.uniformRole = uniform.id;
   const bodyRoot = new THREE.Group();
   bodyRoot.name = `enemy-soldier-${id}-body`;
   root.add(bodyRoot);
@@ -777,55 +852,22 @@ export function createEnemySoldier(id, visualVariant, assets) {
   beltBuckle.position.set(0, -0.295, -0.142);
   torsoPivot.add(collar, belt, beltBuckle);
 
-  const neck = mesh(geometry.neck, materials.skin, 'neck');
+  const neck = mesh(geometry.neck, palette.clothDark, 'sealed-neck-gaiter');
   neck.position.y = 0.385;
   torsoPivot.add(neck);
 
   const headPivot = new THREE.Group();
   headPivot.position.y = 0.485;
   torsoPivot.add(headPivot);
-  const head = mesh(geometry.head, materials.skin, 'head');
+  const head = mesh(geometry.head, palette.clothDark, 'lined-helmet-hood');
   head.scale.set(0.96, 1.02, 0.96);
-  const helmet = mesh(geometry.helmet, palette.armour, 'helmet-shell');
-  helmet.position.y = 0.025;
-  helmet.rotation.x = -0.04;
-  const helmetRim = mesh(geometry.helmetRim, palette.armour, 'helmet-rim');
-  helmetRim.position.set(0, -0.004, -0.01);
-  const earpiece = mesh(geometry.earpiece, materials.weapon, 'communications-earpiece');
-  earpiece.rotation.z = Math.PI / 2;
-  earpiece.position.set(-0.137, -0.008, 0);
-  const antenna = mesh(geometry.antenna, materials.weaponEdge, 'radio-antenna');
-  antenna.position.set(-0.128, 0.12, 0.04);
-  antenna.rotation.z = -0.13;
-  const faceMask = mesh(geometry.faceMask, palette.clothDark, 'protective-face-wrap');
-  faceMask.position.set(0, -0.058, -0.106);
-  faceMask.rotation.x = -0.06;
-  const goggleFrame = mesh(geometry.goggleFrame, materials.glove, 'ballistic-goggle-frame');
-  goggleFrame.position.set(0, 0.034, -0.118);
-  const leftLens = mesh(geometry.goggleLens, materials.lens, 'left-goggle-lens', false);
-  leftLens.position.set(-0.05, 0.037, -0.141);
-  const rightLens = mesh(geometry.goggleLens, materials.lens, 'right-goggle-lens', false);
-  rightLens.position.set(0.05, 0.037, -0.141);
-  const helmetMount = mesh(geometry.helmetMount, materials.weaponEdge, 'helmet-front-mount');
-  helmetMount.position.set(0, 0.13, -0.101);
-  helmetMount.rotation.x = -0.3;
-  const helmetRailLeft = mesh(geometry.helmetRail, materials.weapon, 'left-helmet-rail');
-  helmetRailLeft.position.set(-0.135, 0.052, -0.005);
-  const helmetRailRight = mesh(geometry.helmetRail, materials.weapon, 'right-helmet-rail');
-  helmetRailRight.position.set(0.135, 0.052, -0.005);
   headPivot.add(
     head,
-    faceMask,
-    goggleFrame,
-    leftLens,
-    rightLens,
-    helmet,
-    helmetRim,
-    helmetMount,
-    helmetRailLeft,
-    helmetRailRight,
-    earpiece,
-    antenna,
+    mesh(gear.shell, palette.shell, 'formed-helmet-shell'),
+    mesh(gear.mask, palette.armour, 'sealed-respirator-and-brow'),
+    mesh(gear.visor, palette.visor, 'curved-protective-visor', false),
+    mesh(gear.hardware, materials.buckle, 'filter-housings-and-comms'),
+    mesh(gear.headSignal, palette.signal, 'helmet-role-marking', false),
   );
   markHitZone(headPivot, id, 'head');
 
@@ -834,19 +876,13 @@ export function createEnemySoldier(id, visualVariant, assets) {
   torsoPivot.add(pack);
   markHitZone(pack, id, 'torso');
 
-  const pouches = [];
-  for (let i = 0; i < 3; i += 1) {
-    const pouch = mesh(geometry.pouch, palette.accent, `magazine-pouch-${i}`);
-    pouch.position.set((i - 1) * 0.13 - 0.012, -0.12 + i * 0.006, -0.19);
-    pouch.rotation.set(-0.05, 0, (i - 1) * 0.025);
-    torsoPivot.add(pouch);
-    pouches.push(pouch);
-  }
-  const utilityPouch = mesh(geometry.pouch, palette.accent, 'side-utility-pouch');
-  utilityPouch.position.set(visualVariant % 2 ? -0.255 : 0.255, -0.25, 0.01);
-  utilityPouch.rotation.z = visualVariant % 2 ? 0.09 : -0.09;
-  torsoPivot.add(utilityPouch);
-
+  const torsoGear = [
+    mesh(gear.plate, palette.shell, 'layered-chest-protector'),
+    mesh(gear.textile, palette.accent, 'stitched-service-pouches'),
+    mesh(gear.vestSignal, palette.signal, 'torso-role-markings', false),
+  ];
+  torsoPivot.add(...torsoGear);
+  torsoGear.forEach((part) => markHitZone(part, id, 'torso'));
   const straps = [-1, 1].map((side) => {
     const curve = createStrapCurve(side * 0.14, 0.25, -0.175, side);
     const strap = mesh(
@@ -874,22 +910,28 @@ export function createEnemySoldier(id, visualVariant, assets) {
     const lower = mesh(geometry.legLower, palette.clothDark, 'reinforced-trouser-shin');
     lower.position.y = -0.197;
     knee.add(lower);
-    const kneepad = mesh(geometry.kneepad, palette.armour, 'kneepad');
-    kneepad.position.set(0, 0.02, -0.075);
-    knee.add(kneepad);
+    const kneepad = mesh(assets.wardrobe.kneePlate, palette.shell, 'formed-knee-protector');
+    kneepad.position.set(0, 0.008, -0.080);
+    const kneeMark = mesh(assets.wardrobe.padMark, palette.armour, 'kneepad-top-binding', false);
+    kneeMark.position.copy(kneepad.position);
+    knee.add(kneepad, kneeMark);
 
+    const ankle = new THREE.Group();
+    ankle.position.y = -0.397;
+    knee.add(ankle);
     const boot = mesh(geometry.boot, materials.boot, 'tactical-boot');
-    boot.position.set(0, -0.475, 0);
-    knee.add(boot);
+    boot.position.y = -0.090;
+    boot.scale.z = 0.91;
     const bootSole = mesh(geometry.bootSole, materials.weapon, 'treaded-boot-sole');
-    bootSole.position.set(0, -0.465, 0);
-    knee.add(bootSole);
+    bootSole.position.y = -0.080;
+    bootSole.scale.z = 0.91;
+    ankle.add(boot, bootSole);
     const thighPocket = mesh(geometry.thighPocket, palette.accent, 'cargo-thigh-pocket');
     thighPocket.position.set(side * 0.09, -0.17, side === (visualVariant % 2 ? -1 : 1) ? -0.07 : 0.025);
     thighPocket.rotation.z = -side * 0.08;
     upperPivot.add(thighPocket);
     markHitZone(upperPivot, id, 'leg');
-    return { upperPivot, knee, boot, bootSole };
+    return { upperPivot, knee, ankle, boot, bootSole };
   }
 
   function makeArm(side) {
@@ -902,7 +944,16 @@ export function createEnemySoldier(id, visualVariant, assets) {
     shoulder.add(upper);
     const shoulderPad = mesh(geometry.shoulderPad, palette.armour, 'layered-shoulder-pad');
     shoulderPad.position.set(side * 0.025, -0.05, -0.005);
-    shoulder.add(shoulderPad);
+    shoulderPad.scale.set(uniform.shoulder, 1, uniform.shoulder);
+    const outerPlate = mesh(assets.wardrobe.shoulderPlate, palette.shell, 'outer-shoulder-protector');
+    outerPlate.position.set(side * 0.053, -0.074, -0.052);
+    outerPlate.rotation.set(0.09, -side * 0.68, side * 0.13);
+    outerPlate.scale.set(uniform.shoulder, 0.94, uniform.shoulder);
+    const shoulderMark = mesh(assets.wardrobe.padMark, palette.signal, 'shoulder-role-marking', false);
+    shoulderMark.position.copy(outerPlate.position);
+    shoulderMark.rotation.copy(outerPlate.rotation);
+    shoulderMark.scale.copy(outerPlate.scale);
+    shoulder.add(shoulderPad, outerPlate, shoulderMark);
     const elbow = new THREE.Group();
     elbow.position.y = -0.37;
     shoulder.add(elbow);
@@ -920,16 +971,20 @@ export function createEnemySoldier(id, visualVariant, assets) {
     hand.position.y = -0.35;
     elbow.add(hand);
     const handParts = [{ geometry: geometry.hand }];
-    for (let fingerIndex = 0; fingerIndex < 4; fingerIndex += 1) {
+    const fingerLengths = [0.89, 1.02, 1, 0.84];
+    for (let fingerIndex = 0; fingerIndex < fingerLengths.length; fingerIndex += 1) {
+      const length = fingerLengths[fingerIndex];
       handParts.push({
         geometry: geometry.finger,
-        position: [(fingerIndex - 1.5) * 0.023, -0.038, -0.027],
-        rotation: [0.82, 0, 0],
+        position: [(fingerIndex - 1.5) * 0.023, -0.040, -0.028],
+        rotation: [0.76 + fingerIndex * 0.048, 0, 0],
+        scale: [0.91, length, 0.91],
       });
       handParts.push({
         geometry: geometry.fingerTip,
-        position: [(fingerIndex - 1.5) * 0.023, -0.068, -0.058],
-        rotation: [1.28, 0, 0],
+        position: [(fingerIndex - 1.5) * 0.023, -0.051 - length * 0.018, -0.036 - length * 0.023],
+        rotation: [1.22 + fingerIndex * 0.043, 0, 0],
+        scale: [0.93, length, 0.93],
       });
     }
     handParts.push({
@@ -975,8 +1030,9 @@ export function createEnemySoldier(id, visualVariant, assets) {
 
   const contactShadowMaterial = new THREE.MeshBasicMaterial({
     color: 0x070908,
+    map: assets.contactMap,
     transparent: true,
-    opacity: 0.28,
+    opacity: 0.38,
     depthWrite: false,
   });
   const contactShadowGeometry = new THREE.CircleGeometry(0.42, 20);
@@ -999,6 +1055,20 @@ export function createEnemySoldier(id, visualVariant, assets) {
     contactShadowGeometry,
   ];
   const ownedMaterials = [contactShadowMaterial];
+  const distanceDetails = [];
+  const bodyShadows = [];
+  const accessoryShadows = [];
+  const detailNames = /binding|marking|strap|buckle|cargo-thigh|cuff|knuckle|treaded|carbine-controls|machined|filter-housings/;
+  const shadowShapes = /combat-shirt|pelvis|helmet-shell|trouser|reinforced-forearm|tailored-upper|tactical-boot/;
+  bodyRoot.traverse((part) => {
+    if (!part.isMesh) return;
+    if (detailNames.test(part.name)) distanceDetails.push(part);
+    if (part.castShadow) {
+      const collection = shadowShapes.test(part.name) ? bodyShadows : accessoryShadows;
+      collection.push(part);
+    }
+  });
+  let renderDetail = '';
 
   const rig = {
     root,
@@ -1013,9 +1083,12 @@ export function createEnemySoldier(id, visualVariant, assets) {
     muzzle: rifle.userData.muzzle,
     contactShadow,
     pose: 'idle',
+    uniformRole: uniform.id,
     stride: id * 1.371,
     recoil: 0,
     hit: 0,
+    hitInput: 0,
+    impactKick: 0,
     death: 0,
     deathTime: 0,
     deathSide: 0,
@@ -1025,6 +1098,14 @@ export function createEnemySoldier(id, visualVariant, assets) {
     setGround(y) {
       root.position.y = y;
       this.lastGroundY = y;
+    },
+    setRenderDetail(near, highQuality) {
+      const tier = `${near}:${highQuality}`;
+      if (renderDetail === tier) return;
+      renderDetail = tier;
+      for (const part of distanceDetails) part.visible = near;
+      for (const part of bodyShadows) part.castShadow = near;
+      for (const part of accessoryShadows) part.castShadow = near && highQuality;
     },
     setPose(pose) {
       this.pose = pose;
@@ -1037,14 +1118,16 @@ export function createEnemySoldier(id, visualVariant, assets) {
       bodyRoot.visible = amount > 0.001;
       bodyRoot.scale.setScalar(amount > 0.001 ? scale : 0.001);
       contactShadow.visible = amount > 0.001;
-      contactShadowMaterial.opacity = 0.28 * amount;
+      contactShadowMaterial.opacity = 0.38 * amount;
       return this;
     },
     animate(dt, motion = 0, aim = 0, firing = false, hit = 0, dead = false) {
-      this.stride += dt * (2.2 + motion * 7.5);
+      this.stride += dt * (1.5 + motion * 9.2);
       this.recoil = THREE.MathUtils.damp(this.recoil, firing ? 1 : 0, 23, dt);
       this.hit = THREE.MathUtils.damp(this.hit, hit, 13, dt);
       this.aimWeight = THREE.MathUtils.damp(this.aimWeight, aim, 8.5, dt);
+      this.impactKick = Math.max(this.impactKick * Math.exp(-dt * 14), Math.min(1, (hit - this.hitInput) * 2.6));
+      this.hitInput = hit;
 
       if (dead) {
         this.deathTime += Math.max(0, dt);
@@ -1082,6 +1165,8 @@ export function createEnemySoldier(id, visualVariant, assets) {
         rightLeg.upperPivot.rotation.set(-0.08 + kneel * 0.28, -0.04, 0.04);
         leftLeg.knee.rotation.set(0.08 + kneel * 0.82, 0, -sideSign * fall * 0.08);
         rightLeg.knee.rotation.set(0.08 + kneel * 1.02, 0, sideSign * fall * 0.06);
+        leftLeg.ankle.rotation.set(-0.13 - kneel * 0.32, 0.07, 0);
+        rightLeg.ankle.rotation.set(0.09 - kneel * 0.23, -0.08, 0);
 
         pelvis.position.y = 0.91 - kneel * 0.13;
         pelvis.rotation.set(
@@ -1138,54 +1223,41 @@ export function createEnemySoldier(id, visualVariant, assets) {
       bodyRoot.quaternion.identity();
 
       const gait = Math.sin(this.stride);
-      const gaitOpposite = Math.sin(this.stride + Math.PI);
-      const walkSwing = motion * 0.58;
       const aimRaise = this.aimWeight;
       const breathing = Math.sin(this.stride * 0.31) * (1 - motion * 0.65);
+      const hitDirection = id % 2 ? -1 : 1;
+      const impact = this.hit * 0.36 + this.impactKick * 0.64;
+      const hipHeight = 0.890 - motion * 0.039 - aimRaise * 0.012;
+      const weightShift = Math.cos(this.stride * 2) * motion * 0.007;
+      animateLeg(leftLeg, -1, this.stride, motion, aimRaise, hipHeight + weightShift);
+      animateLeg(rightLeg, 1, this.stride, motion, aimRaise, hipHeight + weightShift);
 
-      // A staggered, weight-bearing firing stance keeps the soldier from
-      // presenting as a symmetrical museum mannequin in alert captures.
-      leftLeg.upperPivot.position.set(-0.125, 0.9, -0.035 * aimRaise);
-      rightLeg.upperPivot.position.set(0.125, 0.9, 0.052 * aimRaise);
-      leftLeg.upperPivot.rotation.x =
-        0.02 + gait * walkSwing + aimRaise * 0.085;
-      rightLeg.upperPivot.rotation.x =
-        0.02 + gaitOpposite * walkSwing - aimRaise * 0.055;
-      leftLeg.upperPivot.rotation.y = 0.052 + aimRaise * 0.045;
-      rightLeg.upperPivot.rotation.y = -0.045 - aimRaise * 0.07;
-      leftLeg.upperPivot.rotation.z = -0.03 - aimRaise * 0.018;
-      rightLeg.upperPivot.rotation.z = 0.03 + aimRaise * 0.038;
-      leftLeg.knee.rotation.x =
-        0.065 + Math.max(0, -gait) * motion * 0.52 + aimRaise * 0.09;
-      rightLeg.knee.rotation.x =
-        0.075 + Math.max(0, -gaitOpposite) * motion * 0.52 + aimRaise * 0.155;
-
-      pelvis.position.y = 0.91 + breathing * 0.002;
-      pelvis.rotation.x = -aimRaise * 0.025;
-      pelvis.rotation.y = aimRaise * 0.065;
-      pelvis.rotation.z = -aimRaise * 0.018 + gait * motion * 0.012;
-      torsoPivot.position.x = aimRaise * 0.014;
-      torsoPivot.position.y = 1.22 + breathing * 0.004;
-      torsoPivot.position.z = aimRaise * 0.008;
+      pelvis.position.y = hipHeight + 0.016 + breathing * 0.003;
+      pelvis.rotation.x = -aimRaise * 0.025 - motion * 0.054;
+      pelvis.rotation.y = aimRaise * 0.065 + gait * motion * 0.065;
+      pelvis.rotation.z = -aimRaise * 0.018 + gait * motion * 0.033;
+      torsoPivot.position.x = aimRaise * 0.014 + gait * motion * 0.018 + impact * hitDirection * 0.013;
+      torsoPivot.position.y = hipHeight + 0.33 + breathing * 0.006 + weightShift;
+      torsoPivot.position.z = aimRaise * 0.008 - motion * 0.019 + impact * 0.022;
       torsoPivot.rotation.x =
-        -aimRaise * 0.095 + this.hit * 0.11 + breathing * 0.008;
+        -aimRaise * 0.095 - motion * 0.061 + impact * 0.19 + breathing * 0.008;
       torsoPivot.rotation.y =
-        -aimRaise * 0.105 + breathing * (1 - aimRaise) * 0.014;
+        -aimRaise * 0.105 - gait * motion * 0.063 + impact * hitDirection * 0.15;
       torsoPivot.rotation.z =
-        -aimRaise * 0.025 + this.hit * 0.13 + gait * motion * 0.014;
+        -aimRaise * 0.025 + impact * hitDirection * 0.16 - gait * motion * 0.038;
       headPivot.position.y = 0.485 + breathing * 0.002;
-      headPivot.rotation.x = aimRaise * 0.052;
+      headPivot.rotation.x = aimRaise * 0.052 + motion * 0.04 + impact * 0.17;
       headPivot.rotation.y =
         aimRaise * 0.095 +
-        Math.sin(this.stride * 0.23) * (1 - aimRaise) * 0.08;
-      headPivot.rotation.z = aimRaise * 0.022;
+        Math.sin(this.stride * 0.23) * (1 - aimRaise) * 0.11 - impact * hitDirection * 0.19;
+      headPivot.rotation.z = aimRaise * 0.022 - gait * motion * 0.012 + impact * hitDirection * 0.07;
 
       rifle.position.x = 0.055 + aimRaise * 0.026 + this.hit * 0.012;
       rifle.position.y = 0.08 + aimRaise * 0.27;
       rifle.position.z =
-        -0.205 - aimRaise * 0.02 + this.recoil * 0.063;
+        -0.205 - aimRaise * 0.02 + this.recoil * 0.063 + impact * 0.015;
       rifle.rotation.x =
-        -0.1 + aimRaise * 0.185 + this.recoil * 0.065;
+        -0.1 + aimRaise * 0.185 + this.recoil * 0.065 - impact * 0.105;
       rifle.rotation.y = -0.045 + aimRaise * 0.014;
       rifle.rotation.z =
         -0.012 - aimRaise * 0.02 + gait * motion * 0.012;
@@ -1198,7 +1270,7 @@ export function createEnemySoldier(id, visualVariant, assets) {
       rightArm.hand.rotation.set(-0.24, 0.13, -0.18);
       leftArm.hand.rotation.set(-0.78, -0.08, 0.22);
 
-      root.position.y = this.lastGroundY + Math.abs(gait) * motion * 0.018;
+      root.position.y = this.lastGroundY;
       contactShadow.position.y = -root.position.y + this.lastGroundY - 0.003;
       contactShadow.scale.set(1, 1, 1);
     },

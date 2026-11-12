@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { WEAPON_DEFINITIONS } from './Arsenal.js';
 import { ProjectileSystem } from './ProjectileSystem.js';
+import { buildVariantModel } from './VariantModel.js';
 
 const FORWARD = new THREE.Vector3();
 const RIGHT = new THREE.Vector3();
@@ -25,8 +27,6 @@ const SPRINT_QUATERNION = new THREE.Quaternion().setFromEuler(
 const TEMP_QUATERNION = new THREE.Quaternion();
 const TEMP_COLOR = new THREE.Color();
 
-const MAG_CAPACITY = 30;
-const FIRE_INTERVAL = 60 / 720;
 const RECOIL_PATTERN = Object.freeze([
   [0.0125, -0.0012],
   [0.0142, 0.0017],
@@ -304,7 +304,7 @@ function setShadow(mesh) {
 }
 
 /**
- * Procedural Cinderline CR-27 "Vesper" first-person rifle.
+ * First-person weapon with deterministic fire, reload and presentation state.
  */
 export class Rifle {
   constructor(context = null, options = {}) {
@@ -312,20 +312,7 @@ export class Rifle {
       options = context;
       context = null;
     }
-    this.options = {
-      magazineCapacity: MAG_CAPACITY,
-      reserveAmmo: 120,
-      damage: 28,
-      projectileSpeed: 172,
-      fireInterval: FIRE_INTERVAL,
-      hipSpread: 0.012,
-      adsSpread: 0.00125,
-      movingSpread: 0.0065,
-      crouchMultiplier: 0.75,
-      reloadDuration: 1.58,
-      emptyReloadDuration: 1.82,
-      ...options,
-    };
+    this.options = { ...WEAPON_DEFINITIONS.vesper, ...WEAPON_DEFINITIONS[options.id], ...options };
 
     this.context = null;
     this.events = null;
@@ -333,9 +320,9 @@ export class Rifle {
     this.camera = null;
     this.viewCamera = null;
     this.root = new THREE.Group();
-    this.root.name = 'VesperRifleViewmodel';
+    this.root.name = this.options.id === 'vesper' ? 'VesperRifleViewmodel' : `${this.options.id}-viewmodel`;
     this.weapon = new THREE.Group();
-    this.weapon.name = 'VesperCR27';
+    this.weapon.name = this.options.id === 'vesper' ? 'VesperCR27' : this.options.name;
     this.root.add(this.weapon);
     this.object3d = this.root;
 
@@ -343,6 +330,9 @@ export class Rifle {
     this.reserve = this.options.reserveAmmo;
     this.enabled = true;
     this.triggerHeld = false;
+    this.triggerWasDown = false;
+    this.drawRemaining = 0;
+    this.swingElapsed = null;
     this.adsWanted = false;
     this.ads = 0;
     this.sprint = 0;
@@ -366,6 +356,7 @@ export class Rifle {
     this._materials = [];
     this._textures = [];
     this._modelBuilt = false;
+    this.variant = null;
     this.rightSleeve = null;
     this.leftSleeveMesh = null;
     this._rng = new LocalRng('cinderline:weapon-spread');
@@ -376,6 +367,15 @@ export class Rifle {
     this.projectiles = new ProjectileSystem(null, options.projectiles);
 
     this.snapshot = {
+      id: this.options.id,
+      name: this.options.name,
+      slot: this.options.slot,
+      adsFov: this.options.adsFov,
+      scope: this.options.scope,
+      scoped: false,
+      mobility: this.options.mobility ?? 1,
+      melee: this.options.melee,
+      action: 'idle',
       magazine: this.magazine,
       ammoInMag: this.magazine,
       magazineCapacity: this.options.magazineCapacity,
@@ -389,7 +389,7 @@ export class Rifle {
       spread: this.options.hipSpread,
       fireCooldown: 0,
       enabled: this.enabled,
-      weaponName: 'CR-27 Vesper',
+      weaponName: this.options.name,
       projectiles: this.projectiles.snapshot,
     };
 
@@ -402,7 +402,7 @@ export class Rifle {
     this.input = context.input;
     this.camera = context.camera;
     this.viewCamera = context.viewCamera;
-    this._rng = acquireStream(context.rng, 'weapon-spread', context.state?.seed);
+    this._rng = acquireStream(context.rng, this.spreadStream, context.state?.seed);
     this.projectiles.init(context);
     if (!this._modelBuilt) this._buildModel();
     if (this.root.parent !== context.viewScene) context.viewScene?.add(this.root);
@@ -415,18 +415,32 @@ export class Rifle {
       this.triggerBuffer = 0;
       this.adsWanted = false;
       this.enabled = false;
+      this.swingElapsed = null;
     }, this._disposers);
     listen(this.events, 'game:pause', () => this.triggerUp(), this._disposers);
 
-    this.root.position.copy(HIP_POSITION);
+    this.root.position.copy(this.hipPosition);
     this.root.quaternion.copy(HIP_QUATERNION);
     this._updateAimRay();
     this._syncSnapshot();
     return this;
   }
 
+  get hipPosition() {
+    return this.variant?.hip ?? HIP_POSITION;
+  }
+
+  get adsPosition() {
+    return this.variant?.ads ?? ADS_POSITION;
+  }
+
+  get spreadStream() {
+    return this.options.id === 'vesper' ? 'weapon-spread' : `weapon-spread:${this.options.id}`;
+  }
+
   triggerDown() {
     this.triggerHeld = true;
+    this.triggerBuffer = 0.12;
   }
 
   triggerUp() {
@@ -434,20 +448,25 @@ export class Rifle {
   }
 
   setADS(enabled) {
-    const next = Boolean(enabled);
+    const next = Boolean(enabled) && !this.options.melee;
     if (next === this.adsWanted) return;
     this.adsWanted = next;
     if (this.context?.state?.phase === 'capture') {
       this.ads = next ? 1 : 0;
-      this.root.position.copy(next ? ADS_POSITION : HIP_POSITION);
+      this.root.position.copy(next ? this.adsPosition : this.hipPosition);
       this.root.quaternion.copy(next ? ADS_QUATERNION : HIP_QUATERNION);
     }
     emit(this.events, 'weapon:ads', { enabled: next });
   }
 
+  restockReserve() {
+    this.reserve = this.options.reserveAmmo;
+    this._syncSnapshot();
+  }
+
   requestReload() {
     if (
-      !this.enabled
+      !this.enabled || this.options.melee || this.drawRemaining > 0
       || this.reloading
       || this.magazine >= this.options.magazineCapacity
       || this.reserve <= 0
@@ -482,7 +501,29 @@ export class Rifle {
       this.triggerBuffer = 0;
       this.adsWanted = false;
     }
-    this.root.visible = this.enabled;
+    this.root.visible = this.enabled && !this.snapshot.scoped;
+    this._syncSnapshot();
+  }
+
+  equip() {
+    this.drawRemaining = this.options.drawDuration;
+    this.triggerWasDown = Boolean(this.input?.buttonDown?.(0));
+    this.root.position.copy(this.hipPosition);
+    this.root.position.y -= 0.18;
+    this.root.quaternion.copy(HIP_QUATERNION);
+    this.setEnabled(true);
+  }
+
+  holster() {
+    this.setEnabled(false);
+    this.ads = 0;
+    this.reloading = false;
+    this.reloadTime = 0;
+    this.reloadPhase = 'idle';
+    this.reloadTransferred = false;
+    this.drawRemaining = 0;
+    this.swingElapsed = null;
+    this._animateReload();
     this._syncSnapshot();
   }
 
@@ -490,8 +531,13 @@ export class Rifle {
     if (!Number.isFinite(dt) || dt <= 0) return;
     this.projectiles.fixedUpdate(dt);
     this._time += dt;
+    const previousCooldown = this.fireCooldown;
     this.fireCooldown = Math.max(0, this.fireCooldown - dt);
+    if (this.enabled && this.options.boltCycle && previousCooldown > 0.46 && this.fireCooldown <= 0.46) {
+      emit(this.events, 'weapon:cycle', { weaponId: this.options.id, volume: 0.52 });
+    }
     this.dryCooldown = Math.max(0, this.dryCooldown - dt);
+    this.drawRemaining = Math.max(0, this.drawRemaining - dt);
     this.recoilBloom = Math.max(0, this.recoilBloom - dt * 0.026);
 
     if (!this.enabled) {
@@ -517,7 +563,10 @@ export class Rifle {
       'PointerSecondary',
     ) || Boolean(this.input?.buttonDown?.(2));
     this.triggerBuffer = Math.max(0, this.triggerBuffer - dt);
-    if (this.input?.consumeButtonPressed?.(0) && !this.reloading) this.triggerBuffer = 0.12;
+    const wantsFire = this.triggerHeld || inputFire;
+    const pressed = this.input?.consumeButtonPressed?.(0) || (wantsFire && !this.triggerWasDown);
+    this.triggerWasDown = wantsFire;
+    if (pressed && !this.reloading && this.drawRemaining <= 0) this.triggerBuffer = 0.12;
     if (inputADS !== this.adsWanted && this.input) this.setADS(inputADS);
     if (inputPressed(this.input, this._inputLatch, 'reload', 'reload', 'KeyR', 'r')) {
       if (this.requestReload()) this.triggerBuffer = 0;
@@ -527,9 +576,11 @@ export class Rifle {
       ?? this.context?.state?.playerSnapshot
       ?? this._playerSnapshot;
 
+    if (this.options.melee) this._advanceSwing(dt);
     if (this.reloading) {
       this._fixedReload(dt);
-    } else if ((this.triggerHeld || inputFire || this.triggerBuffer > 0) && this.fireCooldown <= 0) {
+    } else if (this.drawRemaining <= 0 && this.fireCooldown <= 0
+      && (this.triggerBuffer > 0 || (this.options.automatic && wantsFire))) {
       this.triggerBuffer = 0;
       this._fire();
     }
@@ -549,7 +600,9 @@ export class Rifle {
     const canSprintPose = sprinting && !this.adsWanted && !this.reloading
       && !this.triggerHeld && !this.input?.buttonDown?.(0) && this._firePose < 0.1;
     this.sprint = damp(this.sprint, canSprintPose ? 1 : 0, 11, dt);
-    this.ads = damp(this.ads, this.adsWanted && !this.reloading ? 1 : 0, 16, dt);
+    const cycling = this.options.boltCycle && this.fireCooldown > 0.2;
+    const canAim = this.adsWanted && !this.reloading && !cycling && this.drawRemaining <= 0;
+    this.ads = damp(this.ads, canAim ? 1 : 0, this.options.aimSpeed, dt);
 
     const speed = Number(player?.speed) || 0;
     const moving = clamp01(speed / 4.25);
@@ -560,7 +613,7 @@ export class Rifle {
     const idleX = Math.sin(this._time * 1.37) * 0.0032 * (1 - this.ads * 0.72);
     const idleY = Math.sin(this._time * 1.91 + 0.8) * 0.0026 * (1 - this.ads * 0.72);
 
-    POSE_POSITION.copy(HIP_POSITION).lerp(ADS_POSITION, this.ads);
+    POSE_POSITION.copy(this.hipPosition).lerp(this.adsPosition, this.ads);
     POSE_QUATERNION.copy(HIP_QUATERNION).slerp(ADS_QUATERNION, this.ads);
     if (this.sprint > 0.001) {
       POSE_POSITION.lerp(SPRINT_POSITION, this.sprint);
@@ -570,10 +623,24 @@ export class Rifle {
     POSE_POSITION.x += (bobX + idleX) * motionScale;
     POSE_POSITION.y += (bobY + idleY) * motionScale - this.visualRecoil * 0.016;
     POSE_POSITION.z += this.visualRecoil * 0.062;
+    if (this.drawRemaining > 0) {
+      const lower = smoothstep(this.drawRemaining / this.options.drawDuration);
+      POSE_POSITION.y -= lower * 0.22;
+      POSE_EULER.set(-lower * 0.37 * motionScale, 0, 0, 'YXZ');
+      POSE_QUATERNION.multiply(TEMP_QUATERNION.setFromEuler(POSE_EULER));
+    }
+    if (this.swingElapsed !== null) {
+      const progress = clamp01(this.swingElapsed / this.options.fireInterval);
+      const arc = Math.sin(progress * Math.PI) * motionScale;
+      POSE_POSITION.x -= arc * 0.46;
+      POSE_POSITION.y += arc * 0.15;
+      POSE_EULER.set(-arc * 0.23, arc * 1.2, -arc * 0.75, 'YXZ');
+      POSE_QUATERNION.multiply(TEMP_QUATERNION.setFromEuler(POSE_EULER));
+    }
     const exactCaptureADS = this.ads === 1
       && this.context?.state?.phase === 'capture';
     if (exactCaptureADS) {
-      POSE_POSITION.copy(ADS_POSITION);
+      POSE_POSITION.copy(this.adsPosition);
       POSE_QUATERNION.copy(ADS_QUATERNION);
     }
     // Capture mode intentionally forces `ads` to exactly 1 before a single
@@ -604,10 +671,15 @@ export class Rifle {
     this._animateReload();
     this._updateAimRay();
     this._syncSnapshot();
+    this.root.visible = this.enabled && !this.snapshot.scoped;
   }
 
   _fire() {
     if (this.reloading) return;
+    if (this.options.melee) {
+      this._beginSwing();
+      return;
+    }
     if (this.magazine <= 0) {
       if (this.dryCooldown <= 0) {
         this.dryCooldown = 0.28;
@@ -620,8 +692,8 @@ export class Rifle {
     this.magazine -= 1;
     this.fireCooldown += this.options.fireInterval;
     this.shotIndex += 1;
-    this.recoilBloom = Math.min(0.018, this.recoilBloom + 0.0021);
-    this.visualRecoil = Math.min(1, this.visualRecoil + 0.68);
+    this.recoilBloom = Math.min(0.018, this.recoilBloom + this.options.bloomPerShot);
+    this.visualRecoil = Math.min(Math.max(1, this.options.visualKick), this.visualRecoil + this.options.visualKick);
     this._firePose = 1;
     this._updateAimRay(true);
 
@@ -629,8 +701,8 @@ export class Rifle {
     const jitterPitch = (rngFloat(this._rng) - 0.5) * 0.002;
     const jitterYaw = (rngFloat(this._rng) - 0.5) * 0.0026;
     const recoil = {
-      pitch: pattern[0] + jitterPitch,
-      yaw: pattern[1] + jitterYaw,
+      pitch: (pattern[0] + jitterPitch) * this.options.recoilScale,
+      yaw: (pattern[1] + jitterYaw) * this.options.recoilScale,
     };
 
     this.projectiles.spawn({
@@ -639,15 +711,18 @@ export class Rifle {
       speed: this.options.projectileSpeed,
       damage: this.options.damage,
       owner: 'player',
-      kind: 'rifle',
-      headshotMultiplier: 2.05,
+      kind: this.options.id === 'vesper' ? 'rifle' : this.options.id,
+      headshotMultiplier: this.options.headshotMultiplier,
     });
 
     this._worldMuzzle(MUZZLE);
-    TRACER_END.copy(MUZZLE).addScaledVector(this.rayDirection, 24);
+    TRACER_END.copy(MUZZLE).addScaledVector(this.rayDirection, this.options.tracerLength);
     emit(this.events, 'weapon:fire', {
       source: 'player',
       kind: 'player',
+      weaponId: this.options.id,
+      flashScale: this.options.flashScale,
+      audibleRadius: this.options.audibleRadius,
       shot: this.shotIndex,
       magazine: this.magazine,
       reserve: this.reserve,
@@ -660,6 +735,30 @@ export class Rifle {
       ads: this.ads,
     });
     this._syncSnapshot();
+  }
+
+  _beginSwing() {
+    this.fireCooldown = this.options.fireInterval;
+    this.swingElapsed = 0;
+    this.shotIndex += 1;
+    this._updateAimRay();
+    emit(this.events, 'weapon:melee', {
+      source: 'player', weaponId: this.options.id, position: this.rayOrigin.clone(),
+    });
+  }
+
+  _advanceSwing(dt) {
+    if (this.swingElapsed === null) return;
+    const previous = this.swingElapsed;
+    this.swingElapsed += dt;
+    if (previous < this.options.windup && this.swingElapsed >= this.options.windup) {
+      this._updateAimRay();
+      this.projectiles.strike({
+        origin: this.rayOrigin, direction: this.rayDirection,
+        range: this.options.meleeReach, damage: this.options.damage,
+      });
+    }
+    if (this.swingElapsed >= this.options.fireInterval) this.swingElapsed = null;
   }
 
   _fixedReload(dt) {
@@ -731,10 +830,14 @@ export class Rifle {
     return out
       .addScaledVector(RIGHT, THREE.MathUtils.lerp(0.23, 0.008, this.ads))
       .addScaledVector(UP, THREE.MathUtils.lerp(-0.2, -0.015, this.ads))
-      .addScaledVector(FORWARD, 0.72);
+      .addScaledVector(FORWARD, this.options.muzzleReach);
   }
 
   _animateReload() {
+    if (this.variant) {
+      this._animateVariant();
+      return;
+    }
     if (!this.magazineMesh || !this.leftHand) return;
     if (!this.reloading) {
       if (this.chargingHandle) this.chargingHandle.position.z = 0.11;
@@ -807,6 +910,33 @@ export class Rifle {
         this.chargingHandle.position.z = 0.08 + Math.sin((p - 0.77) / 0.13 * Math.PI) * 0.075;
       }
     }
+  }
+
+  _animateVariant() {
+    const { magazine, magazineHome, movingPart, movingHome, support } = this.variant;
+    if (movingPart) {
+      movingPart.position.copy(movingHome);
+      if (this.options.boltCycle) {
+        const cycle = clamp01((this.options.fireInterval - this.fireCooldown - 0.09) / 0.61);
+        const travel = Math.sin(cycle * Math.PI);
+        movingPart.position.z += travel * 0.115;
+        movingPart.rotation.z = travel * 0.42;
+      } else {
+        movingPart.position.z += this._firePose * 0.05;
+      }
+    }
+    if (!magazine) return;
+    const progress = this.reloading ? clamp01(this.reloadTime / this.reloadDuration) : 0;
+    const tilt = Math.sin(progress * Math.PI);
+    const travel = smoothstep(Math.min((progress - 0.12) / 0.3, (0.82 - progress) / 0.26));
+    magazine.visible = progress < 0.43 || progress >= 0.59;
+    magazine.position.copy(magazineHome);
+    magazine.position.y -= travel * 0.2;
+    magazine.rotation.z = travel * 0.21;
+    this.leftHand.position.copy(support);
+    this.leftHand.position.lerp(LOCAL_TARGET.copy(magazine.position).add(POSE_POSITION.set(-0.052, -0.068, 0.043)), tilt);
+    this.root.rotation.z += tilt * 0.26;
+    this.root.position.y -= tilt * 0.04;
   }
 
   _buildModel() {
@@ -912,6 +1042,17 @@ export class Rifle {
       glove,
       sleeve,
     );
+
+    if (this.options.id !== 'vesper' && WEAPON_DEFINITIONS[this.options.id]) {
+      this.variant = buildVariantModel(this.weapon, this.options.id, {
+        gunmetal, darkMetal, exposedMetal, railMetal, accentMetal, polymer, rubber, opticGlass, reticle,
+      }, { roundedPart, cylinderPart, sideProfileGeometry });
+      this._buildHands(glove, sleeve, rubber);
+      if (!this.variant.support) this.leftHand.visible = false;
+      else this.leftHand.position.copy(this.variant.support);
+      this.weapon.traverse(setShadow);
+      return;
+    }
 
     // Continuous side-profiled receiver shells establish the rifle's primary
     // silhouette. Their tapered noses, shoulder breaks and flared lower remove
@@ -1383,6 +1524,7 @@ export class Rifle {
     const rightArm = new THREE.Group();
     rightArm.name = 'right-arm';
     rightArm.position.set(0.052, -0.13, 0.11);
+    if (this.variant?.rightHand) rightArm.position.copy(this.variant.rightHand);
     rightArm.rotation.set(-0.12, -0.08, -0.08);
     this.weapon.add(rightArm);
     const rightPalm = new THREE.Mesh(profileGeometry([
@@ -1553,6 +1695,11 @@ export class Rifle {
       : 0;
     this.snapshot.ads = this.ads;
     this.snapshot.isADS = this.ads > 0.85;
+    this.snapshot.scoped = this.options.scope && this.ads > 0.84;
+    this.snapshot.action = this.drawRemaining > 0 ? 'draw'
+      : this.swingElapsed !== null ? 'swing'
+        : this.reloading ? 'reload'
+          : this.options.boltCycle && this.fireCooldown > 0 ? 'bolt' : 'idle';
     const player = this.context?.state?.player
       ?? this.context?.state?.playerSnapshot
       ?? this._playerSnapshot;
@@ -1572,6 +1719,9 @@ export class Rifle {
     this.reserve = this.options.reserveAmmo;
     this.enabled = true;
     this.triggerHeld = false;
+    this.triggerWasDown = false;
+    this.drawRemaining = 0;
+    this.swingElapsed = null;
     this.adsWanted = false;
     this.ads = 0;
     this.sprint = 0;
@@ -1589,11 +1739,11 @@ export class Rifle {
     this._time = 0;
     this._moveState = 'idle';
     this._inputLatch = Object.create(null);
-    this._rng = acquireStream(this.context?.rng, 'weapon-spread', seed);
-    if (this._rng instanceof LocalRng) this._rng.reset(`${seed}:weapon-spread`);
+    this._rng = acquireStream(this.context?.rng, this.spreadStream, seed);
+    if (this._rng instanceof LocalRng) this._rng.reset(`${seed}:${this.spreadStream}`);
     else this._rng?.reset?.();
     this.root.visible = true;
-    this.root.position.copy(HIP_POSITION);
+    this.root.position.copy(this.hipPosition);
     this.root.quaternion.copy(HIP_QUATERNION);
     if (this.magazineMesh) {
       this.magazineMesh.visible = true;

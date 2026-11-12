@@ -1,9 +1,10 @@
 # Cinderline: One Shot
 
 An original, deterministic browser tactical FPS built with Three.js and WebGL2.
-Restore three relays and extract from Ash Market, a code-generated industrial
-district with reactive patrols, advanced first-person movement, and synthesized
-spatial audio. Endless Sweep is available from the main menu.
+Equip a loadout, restore three relays, and extract from Ash Market. Cinderline
+combines six switchable weapons and three tactical utilities with reactive
+patrols, advanced first-person movement, and synthesized spatial audio. Endless
+Sweep is available from the main menu.
 
 **▶ [Play online](https://fps-gpt56-one-shot.web.app)** · **[Run locally](#quick-start)** ·
 **[Explore the gameplay](#gameplay)** ·
@@ -29,6 +30,7 @@ ship with the build. [Material provenance](artifacts/material-provenance.md)
 | **World** | Authored Ash Market layout with deterministic procedural assembly and dressing |
 | **Simulation** | Fixed `1 / 60 s` gameplay step with isolated seeded RNG streams |
 | **Modes** | Relay Run and Endless Sweep with `7 × operation` total hostiles |
+| **Armory** | Six weapons, three throwables, reserve ammunition, and in-game credits |
 | **Assets** | Blender exterior mesh, authored PBR textures and procedural world assets |
 
 ## Gameplay
@@ -68,6 +70,33 @@ as untrusted input, validated, bounded, and rendered with `textContent`.
 Client-only storage is convenient rather than tamper-proof; authoritative
 competitive progression would require a backend.
 
+## Armory and credits
+
+Open **Armory** on the main menu to outfit a Relay Run before deploying. Press
+**B** at the deployment locker or at a powered relay when nearby hostiles have
+been cleared. Each new run starts with **1,400 credits**. An elimination earns
+125, a restored relay earns 250, and an operation clear earns 400. Credits and
+owned weapons carry into the next Endless Sweep operation. A retry restores
+the opening loadout for the current operation and resets rewards earned during
+the attempt.
+
+| Slot | Equipment | Purchase |
+| --- | --- | ---: |
+| Primary | CR-27 Vesper · balanced automatic rifle | Included |
+| Primary | SR-9 Flicker · fast SMG with quicker handling | 430 |
+| Primary | LR-4 Meridian · scoped sniper with a manual cycle | 800 |
+| Secondary | P-12 Ember · quick semi-automatic sidearm | Included |
+| Secondary | H-7 Cinder · slower, heavier sidearm | 300 |
+| Melee | Arc Cutter · close-range swing without ammunition | Included |
+| Throwable | Pulse Orb · nearby damage checked against cover | 230 |
+| Throwable | Haze Orb · temporary hostile sight obstruction | 160 |
+| Throwable | Stasis Orb · temporarily interrupts nearby hostiles | 200 |
+| Supply | Reserve Case · refills reserves for owned firearms | 180 |
+
+Switching weapons preserves the magazine and reserve of each firearm. Already
+owned weapons can be re-equipped in an armory at no charge. Carry up to two of
+each throwable and four total.
+
 ## Feature highlights
 
 - **Tactical enemy perception** — soldiers detect only within a 35° half-angle,
@@ -82,9 +111,9 @@ competitive progression would require a backend.
 - **Advanced movement** — sprint, crouch, slide, jump, protected lean, slopes,
   and grounded low-step traversal. The capsule may step or mantle only up to
   0.44 m, preventing tall props and buildings from lifting the player onto roofs.
-- **Reactive enemies** — patrol, investigate, pursue, use cover, reposition,
-  fire, reload, react to hits, buckle when killed, fall fully to the ground, and
-  despawn after a short delay.
+- **Reactive enemies** — four distinct uniforms, articulated foot placement,
+  and hit reactions. Patrols investigate, pursue, use cover, reposition, and
+  reload.
 - **Code-generated presentation** — procedural architecture and props, a
   separate first-person viewmodel scene, pooled combat effects, post-processing,
   and Web Audio synthesis with HRTF positioning.
@@ -134,6 +163,10 @@ camera sway settings, saved in the browser.
 | `Q` / `E` | Protected lean left / right |
 | Hold `F` | Operate the active relay or extract |
 | `G` | Queue the decoy at the last powered station |
+| `B` | Open a secure armory locker |
+| `1` / `2` / `3` | Primary / sidearm / melee |
+| `4` / `5` / `6` | Select Pulse / Haze / Stasis |
+| `T` | Throw the selected utility |
 | `Esc` | Release pointer lock and pause |
 | Menu buttons | Resume, restart, advance operation, or change quality |
 
@@ -271,6 +304,7 @@ npm run profile
 | Progression contract | Hostile storage input, monotonic records, deterministic operation seeds |
 | Full gameplay loop | Relay progress, interruption, extraction, replay, plus sweep victory, scaling, and defeat |
 | Input | Short-click buffering, same-step aim, pointer lock, movement, stance, and reload |
+| Equipment | Store prices and limits, weapon feel, ammo retention, utility effects, and retry |
 | Browser diagnostics | Zero console errors, page errors, failed requests, or HTTP errors |
 | Capture set | 7 deterministic 1440×810 views with hashes and zero browser errors |
 
@@ -301,8 +335,8 @@ supported by the capture and profile scripts.
 
 - Desktop WebGL2 and pointer-lock controls are required; touch, gamepad, and
   accessibility-specific input modes are not implemented.
-- The game is single-player, single-map, and single-rifle. Both modes take place
-  in Ash Market.
+- The game is single-player and takes place in Ash Market. Both modes share
+  the map and armory.
 - Highest-operation persistence stores no sensitive data and is not tamper-proof
   against DevTools, extensions, or local browser-profile modification.
 - Browser audio starts only after a user gesture.

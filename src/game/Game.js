@@ -18,10 +18,13 @@ import { PhysicsWorld } from "../physics/PhysicsWorld.js";
 import { PlayerController } from "../player/PlayerController.js";
 import { RendererSystem } from "../rendering/RendererSystem.js";
 import { UI } from "../ui/UI.js";
+import { WEAPON_DEFINITIONS } from "../weapons/Arsenal.js";
 import { Rifle } from "../weapons/Rifle.js";
+import { THROWABLES, Throwables } from "../weapons/Throwables.js";
 import { WorldBuilder } from "../world/WorldBuilder.js";
 import { normalizeControls, readControls, saveControls } from "./ControlSettings.js";
 import { RELAY_PATROLS, RelayMission } from "./RelayMission.js";
+import { CREDIT_REWARDS, OperationEconomy } from "./OperationEconomy.js";
 import {
   deriveLevelSeed,
   readHighestClearedLevel,
@@ -31,6 +34,27 @@ import {
 const FIXED_STEP = 1 / 60;
 const BASE_ENEMY_COUNT = 7;
 const ACTIVE_ENEMY_LIMIT = 12;
+const DEFAULT_KIT = Object.freeze({ primary: "vesper", secondary: "sidearm", melee: "melee" });
+const WEAPON_KEYS = Object.freeze({ Digit1: "primary", Digit2: "secondary", Digit3: "melee" });
+const THROWABLE_KEYS = Object.freeze({ Digit4: "pulse", Digit5: "haze", Digit6: "stasis" });
+const ARMORY_CATALOG = [
+  ...Object.values(WEAPON_DEFINITIONS).map((item) => ({
+    id: item.id, slot: item.slot, label: item.name, price: item.cost, detail: item.description,
+    spec: item.melee ? 'No ammunition' : `${item.magazineCapacity} rounds per magazine`,
+  })),
+  ...Object.values(THROWABLES).map((item) => ({
+    id: item.id, kind: "throwable", label: item.label, price: item.price,
+    detail: item.detail ?? item.description, max: item.max ?? 2,
+  })),
+  {
+    id: "reserve-case", kind: "service", label: "Reserve Case", price: 180,
+    detail: "Refills reserve ammunition for every owned firearm. Magazines still need a reload.",
+  },
+];
+const THROWABLE_IDS = Object.values(THROWABLE_KEYS);
+const ARMORY_RADIUS = 9;
+const FIELD_LOCKER_RADIUS = 3.2;
+const FIELD_LOCKER_THREAT_RADIUS = 10;
 const MENU_CAMERA_POSITION = new THREE.Vector3(-45.6, 2.35, 5.4);
 const MENU_CAMERA_TARGET = new THREE.Vector3(-42.5, 3.5, -6);
 const _damageDirection = new THREE.Vector3(0, 0, 1);
@@ -136,7 +160,19 @@ export class Game {
       options.quality || "high",
     );
     if (options.exchangeAsset) this.rendering.installExchange(options.exchangeAsset);
+    this.economy = new OperationEconomy(
+      ARMORY_CATALOG,
+      DEFAULT_KIT,
+      (id) => id === "reserve-case" && this.economy.state.owned.some((weaponId) => {
+        const weapon = this.weaponInstances.get(weaponId);
+        return weapon && weapon.reserve < weapon.options.reserveAmmo;
+      }),
+    );
     this.state = {
+      economy: this.economy.state,
+      armoryAvailable: false,
+      equippedSlot: "primary",
+      throwable: "pulse",
       phase: "menu",
       mode: "sweep",
       mission: null,
@@ -163,7 +199,7 @@ export class Game {
       input: null,
       quality: this.rendering.quality,
       physics: this.physics,
-      assets: { exchangeAsset: options.exchangeAsset },
+      assets: { exchangeAsset: options.exchangeAsset, armory: this.economy },
       state: this.state,
       diagnostics: this.diagnostics,
     };
@@ -222,7 +258,10 @@ export class Game {
     this.state.player = this.player.snapshot;
     this.state.playerSnapshot = this.player.snapshot;
 
-    this.rifle = new Rifle(this.context);
+    this.rifle = new Rifle(this.context, WEAPON_DEFINITIONS.vesper);
+    this.weaponInstances = new Map([["vesper", this.rifle]]);
+    this.activeWeaponId = "vesper";
+    this.inOpeningArea = true;
     this.state.weapon = this.rifle.snapshot;
     this.state.weaponSnapshot = this.rifle.snapshot;
     this.player.setEnabled(false);
@@ -242,6 +281,9 @@ export class Game {
       safeRadius: ENEMY_INITIAL_SAFE_RADIUS,
     });
     this.enemies.init(this.context);
+    this.throwables = new Throwables(this.context, { enemies: this.enemies });
+    this.enemies.visionOccluded = (from, to) => this.throwables.blocksVision(from, to);
+    this.enemies.isStunned = (id) => this.throwables.isStunned(id);
     this.state.requiredKills = BASE_ENEMY_COUNT;
 
     this.audio = new AudioSystem();
@@ -266,6 +308,12 @@ export class Game {
       const size = this.rendering.resize();
       this.events.emit("render:resize", size);
     }, { signal });
+    window.addEventListener("keydown", (event) => {
+      if (this.state.phase === "armory" && event.code === "Escape") {
+        event.preventDefault();
+        this.closeArmory();
+      }
+    }, { signal });
     window.addEventListener("blur", () => {
       if (this.state.phase === "playing" && !this.options.capture) {
         this.events.emit("game:pause", { source: "focus-loss" });
@@ -279,7 +327,10 @@ export class Game {
     }, { signal });
 
     this.unsubscribers.push(
-      this.events.on("game:start", (event) => this.activateMatch(event?.mode)),
+      this.events.on("game:start", (event) => this.activateMatch(event?.mode, event?.armory)),
+      this.events.on("armory:open", () => this.openArmory()),
+      this.events.on("armory:close", () => this.closeArmory()),
+      this.events.on("armory:buy", ({ id }) => this.buyEquipment(id)),
       this.events.on("game:menu", () => this.returnToMenu()),
       this.events.on("controls:change", (settings) => this.applyControls(settings)),
       this.events.on("game:pause", () => this.applyPause()),
@@ -293,7 +344,12 @@ export class Game {
           this.events.emit("game:pause", { source: "pointer-lock-loss" });
         }
       }),
+      this.events.on("weapon:fire", (shot) => {
+        if (shot.kind !== "enemy") this.inOpeningArea = false;
+      }),
+      this.events.on("weapon:melee", () => { this.inOpeningArea = false; }),
       this.events.on("player:damage", () => {
+        this.inOpeningArea = false;
         if (this.state.mission) this.relayMission.interrupt();
       }),
       this.events.on("enemy:death", (event) => this.onEnemyDeath(event)),
@@ -301,8 +357,8 @@ export class Game {
     );
   }
 
-  activateMatch(mode = "sweep") {
-    if (this.state.phase === "playing") return;
+  activateMatch(mode = "sweep", startInArmory = false) {
+    if (this.state.phase === "playing" || this.state.phase === "armory") return;
     if (this.state.phase === "victory" || this.state.phase === "defeat") {
       this.applyRestart();
       return;
@@ -311,8 +367,10 @@ export class Game {
     this.state.mission = this.state.mode === "relay" ? this.relayMission.state : null;
     const spawn = this.state.mode === "relay" ? this.world.relaySpawn : this.world.spawn;
     this.player.setSpawn(spawn.position, spawn.yaw);
-    this._resetRound();
+    this.economy.resetCampaign();
+    this._resetRound({ deferPointerLock: startInArmory });
     this.audio.resume();
+    if (startInArmory) this.openArmory();
   }
 
   returnToMenu() {
@@ -322,6 +380,8 @@ export class Game {
     this.relayMission?.reset();
     this.setDistrictPowerStage(0);
     this.syncRelaySignals();
+    this.throwables.reset();
+    this.state.armoryAvailable = false;
     this.state.level = 1;
     this.state.seed = this.baseSeed;
     if (this.world.spawn) this.player.setSpawn(this.world.spawn.position, this.world.spawn.yaw);
@@ -374,6 +434,7 @@ export class Game {
   }
 
   applyRestart() {
+    this.economy.retry();
     this._resetRound();
   }
 
@@ -382,6 +443,8 @@ export class Game {
     this.state.level += 1;
     this.state.seed = deriveLevelSeed(this.baseSeed, this.state.level);
     this.state.requiredKills = this._enemyCountForLevel(this.state.level);
+    this.economy.saveCheckpoint();
+    this.economy.retry();
     this._resetRound();
     return true;
   }
@@ -396,7 +459,7 @@ export class Game {
     );
   }
 
-  _resetRound() {
+  _resetRound({ deferPointerLock = false } = {}) {
     this.state.phase = "playing";
     this.state.kills = 0;
     this.state.elapsed = 0;
@@ -407,7 +470,15 @@ export class Game {
     this.rng.reset(this.state.seed);
     this.input.reset();
     this.player.reset(this.state.seed);
-    this.rifle.reset(this.state.seed);
+    for (const weapon of this.weaponInstances.values()) {
+      weapon.reset(this.state.seed);
+      weapon.setEnabled(false);
+    }
+    this.selectWeapon("primary", false);
+    this.throwables.reset();
+    this.state.throwable = THROWABLE_IDS.find((id) => this.economy.state.supplies[id] > 0) ?? "pulse";
+    this.inOpeningArea = true;
+    this.state.armoryAvailable = true;
     this.effects.reset(this.state.seed);
     this.enemies.reset(this.state.seed, {
       totalCount: this.state.requiredKills,
@@ -423,7 +494,117 @@ export class Game {
     this.captureOverride = null;
     this.captureTargetId = null;
     this.clock.clearAccumulator();
+    if (!deferPointerLock) this.requestPointerLock();
+  }
+
+  selectWeapon(slot, animate = true) {
+    const id = this.economy.state.equipped[slot];
+    if (!id) return false;
+    if (this.activeWeaponId !== id) {
+      this.rifle.holster();
+      let weapon = this.weaponInstances.get(id);
+      if (!weapon) {
+        weapon = new Rifle(this.context, WEAPON_DEFINITIONS[id]);
+        weapon.setEnabled(false);
+        this.weaponInstances.set(id, weapon);
+      }
+      this.rifle = weapon;
+      this.activeWeaponId = id;
+      this.state.weapon = weapon.snapshot;
+      this.state.weaponSnapshot = weapon.snapshot;
+      this.events.emit("weapon:changed", { id, slot });
+    }
+    this.state.equippedSlot = slot;
+    if (this.state.phase === "playing") {
+      if (animate) this.rifle.equip();
+      else this.rifle.setEnabled(true);
+    }
+    return true;
+  }
+
+  armoryLocation() {
+    const position = this.player.position;
+    const atDeployment = position.distanceTo(this.player.spawnPosition) <= ARMORY_RADIUS;
+    const unlocked = this.state.mission?.completed ?? 0;
+    const station = atDeployment ? null : this.world.route.find((entry, index) => index < unlocked
+      && position.distanceTo(entry.position) <= FIELD_LOCKER_RADIUS);
+    if (!atDeployment && !station) return null;
+    const nearbyThreat = this.enemies.enemies.some((enemy) => enemy.alive
+      && enemy.rig.root.position.distanceToSquared(position) < FIELD_LOCKER_THREAT_RADIUS ** 2);
+    if (nearbyThreat) return null;
+    return atDeployment ? "Deployment locker" : `${station.label} field locker`;
+  }
+
+  openArmory() {
+    if (this.state.phase !== "playing") return false;
+    const location = this.armoryLocation();
+    if (!location) {
+      this.events.emit("ui:announce", { text: "Armory requires a secure locker", tone: "warning", duration: 1.6 });
+      return false;
+    }
+    this.state.phase = "armory";
+    this.relayMission?.clearHold();
+    this.player.setEnabled(false);
+    this.rifle.setEnabled(false);
+    this.input.enabled = false;
+    this.input.reset();
+    this.input.exitPointerLock();
+    this.clock.clearAccumulator();
+    this.events.emit("armory:opened", { location, opening: this.inOpeningArea });
+    return true;
+  }
+
+  closeArmory() {
+    if (this.state.phase !== "armory") return false;
+    this.state.phase = "playing";
+    this.player.setEnabled(true);
+    this.rifle.equip();
+    this.input.enabled = true;
+    this.clock.clearAccumulator();
+    this.audio.resume();
+    this.events.emit("armory:closed");
     this.requestPointerLock();
+    return true;
+  }
+
+  buyEquipment(id) {
+    if (this.state.phase !== "armory" || !this.economy.buy(id)) return false;
+    const item = this.economy.items.get(id);
+    if (item.slot) this.selectWeapon(item.slot, false);
+    if (item.kind === "throwable") this.state.throwable = id;
+    if (item.kind === "service") {
+      for (const weaponId of this.economy.state.owned) this.weaponInstances.get(weaponId)?.restockReserve();
+    }
+    if (this.inOpeningArea) this.economy.saveCheckpoint();
+    this.events.emit("audio:play", { name: "ui-confirm", volume: 0.7 });
+    this.events.emit("armory:changed", {
+      message: item.kind === "service" ? "Reserve ammunition restocked"
+        : item.slot ? `${item.label} equipped` : `${item.label} stocked`,
+    });
+    return true;
+  }
+
+  updateEquipmentInput() {
+    this.state.armoryAvailable = Boolean(this.armoryLocation());
+    if (this.inOpeningArea && this.player.position.distanceTo(this.player.spawnPosition) > ARMORY_RADIUS) {
+      this.inOpeningArea = false;
+    }
+    if (this.input.consumePressed("KeyB") && this.openArmory()) return;
+    for (const [key, slot] of Object.entries(WEAPON_KEYS)) {
+      if (this.input.consumePressed(key) && this.state.equippedSlot !== slot) this.selectWeapon(slot);
+    }
+    for (const [key, id] of Object.entries(THROWABLE_KEYS)) {
+      if (this.input.consumePressed(key)) this.state.throwable = id;
+    }
+    if (this.input.consumePressed("KeyT")) {
+      const id = this.state.throwable;
+      if (!(this.economy.state.supplies[id] > 0)) {
+        this.events.emit("ui:announce", { text: "Selected pouch is empty", tone: "warning", duration: 1.1 });
+      } else if (this.throwables.throw(id, this.player)) {
+        this.inOpeningArea = false;
+        this.economy.use(id);
+      }
+    }
   }
 
   applyQuality(name) {
@@ -435,6 +616,8 @@ export class Game {
   onEnemyDeath() {
     if (this.state.phase !== "playing") return;
     this.state.kills += 1;
+    this.inOpeningArea = false;
+    this.economy.reward(CREDIT_REWARDS.elimination);
     if (this.state.mode === "sweep" && this.state.kills >= this.state.requiredKills) {
       this.finishMatch("victory");
     }
@@ -446,6 +629,7 @@ export class Game {
 
   finishMatch(result) {
     this.state.phase = result;
+    if (result === "victory") this.economy.reward(CREDIT_REWARDS.victory);
     if (result === "victory" && this.state.mode === "sweep") {
       const persisted = writeHighestClearedLevel(this.state.level);
       this.state.highestClearedLevel = Math.max(
@@ -467,6 +651,7 @@ export class Game {
       requiredKills: this.state.requiredKills,
       mode: this.state.mode,
       mission: this.state.mission,
+      economy: this.economy.snapshot(),
     });
   }
 
@@ -477,11 +662,15 @@ export class Game {
       }
       return;
     }
+    this.updateEquipmentInput();
+    if (this.state.phase !== "playing") return;
     this.state.elapsed += dt;
     this.player.fixedUpdate(dt);
     if (this.state.phase !== "playing") return;
     this.player.syncAimCamera();
-    this.rifle.fixedUpdate(dt);
+    for (const weapon of this.weaponInstances.values()) weapon.fixedUpdate(dt);
+    if (this.state.phase !== "playing") return;
+    this.throwables.fixedUpdate(dt);
     this.enemies.fixedUpdate(dt);
     this.effects.fixedUpdate(dt);
     if (this.state.phase === "playing" && this.state.mission) {
@@ -526,6 +715,8 @@ export class Game {
       this.finishMatch("victory");
       return;
     }
+    this.inOpeningArea = false;
+    this.economy.reward(CREDIT_REWARDS.relay);
     const { completed, total } = this.relayMission.state;
     const power = this.setDistrictPowerStage(completed);
     const label = power?.label ?? previousTarget.label;
@@ -544,7 +735,7 @@ export class Game {
     this.rifle.update(dt, alpha);
     if (!this.captureOverride) {
       const camera = this.rendering.camera;
-      const fov = THREE.MathUtils.lerp(72, 61, this.rifle.ads);
+      const fov = THREE.MathUtils.lerp(72, this.rifle.snapshot.adsFov ?? 61, this.rifle.ads);
       if (Math.abs(camera.fov - fov) > 0.015) {
         camera.fov = fov;
         camera.updateProjectionMatrix();
@@ -617,7 +808,9 @@ export class Game {
     const startingShot = this.rifle.shotIndex;
     this.rifle.triggerDown();
     let guard = 0;
-    while (this.rifle.shotIndex - startingShot < shots && guard < shots * 12) {
+    const maxSteps = Math.ceil((this.rifle.options.fireInterval + 0.5) / FIXED_STEP) * shots + 60;
+    while (this.rifle.shotIndex - startingShot < shots && guard < maxSteps) {
+      if (!this.rifle.options.automatic) this.rifle.triggerDown();
       this.fixedUpdate(FIXED_STEP);
       guard += 1;
     }
@@ -868,6 +1061,10 @@ export class Game {
       elapsed: this.state.elapsed,
       seed: this.state.seed,
       quality: this.state.quality,
+      economy: this.economy.snapshot(),
+      equippedSlot: this.state.equippedSlot,
+      throwable: this.state.throwable,
+      armoryAvailable: this.state.armoryAvailable,
     };
   }
 
@@ -893,6 +1090,7 @@ export class Game {
         moveState: this.player.snapshot.moveState,
       },
       weapon: { ...this.rifle.snapshot },
+      throwables: this.throwables.snapshot,
       enemies: this.enemies.snapshot.enemies.map((enemy) => ({
         ...enemy,
         position: vectorSnapshot(enemy.position),
@@ -1020,9 +1218,11 @@ export class Game {
     this.unsubscribers.length = 0;
     this.ui.dispose();
     this.audio.dispose();
+    this.throwables.dispose();
     this.enemies.dispose();
     this.effects.dispose();
-    this.rifle.dispose();
+    for (const weapon of this.weaponInstances.values()) weapon.dispose();
+    this.weaponInstances.clear();
     this.player.dispose();
     this.input.dispose();
     this.worldBuilder.dispose?.();
