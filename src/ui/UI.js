@@ -9,6 +9,9 @@ const CONTROL_FIELDS = `
     <input type="range" data-control="adsSensitivity" min="25" max="100" step="5">
   </label>
   <label class="cl-setting cl-check"><input type="checkbox" data-control="reducedMotion"> Reduce camera sway</label>
+  <label class="cl-setting"><span>Master volume <output data-control-value="volume"></output></span>
+    <input type="range" data-control="volume" min="0" max="100" step="1">
+  </label>
 `;
 
 const UI_STYLE_ID = 'cinderline-ui-styles';
@@ -125,10 +128,19 @@ ${ARMORY_STYLES}
 .cl-setting output { color:var(--cl-accent); padding-left:5px; }
 .cl-check { display:flex; align-items:center; margin-top:3px; cursor:pointer; }
 .cl-status-title { font-size:clamp(58px,9vw,128px); }
-.cl-status-data { display:flex; gap:34px; margin:38px 0 32px; }
+.cl-status-data { display:flex; gap:24px; flex-wrap:wrap; margin:28px 0 24px; }
 .cl-stat { min-width:100px; border-top:1px solid var(--cl-line); padding-top:9px; }
 .cl-stat strong { display:block; color:var(--cl-accent); font-size:28px; letter-spacing:-.02em; }
 .cl-stat span { color:var(--cl-muted); font-size:9px; letter-spacing:.18em; }
+.cl-debrief { margin:18px 0 0; color:#c4d4cc; font-size:13px; line-height:1.5; text-transform:none; }
+.cl-record[data-relay-record] { margin-top:10px; }
+.cl-range-summary {
+  width:min(440px,92vw); margin:5px auto 0; padding:9px 12px; color:#e9eee6;
+  border:1px solid #526561; background:#111c22e8; font-size:11px; line-height:1.45;
+}
+.cl-range-summary strong { color:#f0c47d; }
+.cl-range-summary p { margin:5px 0 0; color:#b8ced1; text-transform:none; letter-spacing:.025em; }
+.cl-range-data { display:flex; gap:5px 12px; justify-content:center; flex-wrap:wrap; }
 .cl-hud { position:absolute; inset:0; opacity:1; transition:opacity .16s; }
 .cl-hud.is-hidden { opacity:0; }
 .cl-topbar { position:absolute; top:21px; left:50%; transform:translateX(-50%); width:min(620px,58vw); text-align:center; }
@@ -400,10 +412,12 @@ export class UI {
             <h1 class="cl-title">CINDER<br>LINE<small>ONE SHOT</small></h1>
             <p class="cl-mission">Restore the district power network, use the service routes it opens, and reach Cross Street.</p>
             <div class="cl-record" data-highest-cleared hidden></div>
+            <div class="cl-record" data-relay-record hidden></div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="start">Deploy</button>
               <button class="cl-btn" data-action="sweep">Endless sweep</button>
               <button class="cl-btn" data-action="armory-deploy">Armory</button>
+              <button class="cl-btn" data-action="range">Practice range</button>
             </div>
           </div>
           <details class="cl-controls">
@@ -460,10 +474,12 @@ export class UI {
           <div>
             <div class="cl-kicker" data-victory-operation>OPERATION 1 · DISTRICT SECURE</div>
             <h1 class="cl-title cl-status-title">CLEAR</h1>
+            <p class="cl-debrief" data-result-summary hidden></p>
             <div class="cl-status-data">
               <div class="cl-stat"><strong data-result-kills>0</strong><span>Hostiles</span></div>
               <div class="cl-stat"><strong data-result-time>00:00</strong><span>Elapsed</span></div>
               <div class="cl-stat"><strong data-result-credits>0</strong><span>Credits earned</span></div>
+              <div class="cl-stat" data-result-relays hidden><strong></strong><span>Relays restored</span></div>
             </div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="next-level">Next operation</button>
@@ -478,10 +494,12 @@ export class UI {
           <div>
             <div class="cl-kicker">SIGNAL LOST</div>
             <h1 class="cl-title cl-status-title">DOWN</h1>
+            <p class="cl-debrief" data-result-summary hidden></p>
             <div class="cl-status-data">
               <div class="cl-stat"><strong data-result-kills>0</strong><span>Neutralized</span></div>
               <div class="cl-stat"><strong data-result-time>00:00</strong><span>Elapsed</span></div>
               <div class="cl-stat"><strong data-result-credits>0</strong><span>Credits earned</span></div>
+              <div class="cl-stat" data-result-relays hidden><strong></strong><span>Relays restored</span></div>
             </div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="restart">Redeploy</button>
@@ -498,6 +516,16 @@ export class UI {
           <div class="cl-objective"><span class="cl-operation">Operation <b data-level>1</b></span><i></i><span data-objective-name>Neutralize hostiles</span><b data-sweep-progress><span data-kills>0</span> / <span data-required>7</span></b><b data-relay-progress hidden>0 / 3</b></div>
           <div class="cl-route" hidden><span class="cl-route-arrow" aria-hidden="true">▲</span><span data-route-label></span><span class="cl-route-distance" data-route-distance></span></div>
           <p class="cl-route-hint" data-route-hint hidden></p>
+          <div class="cl-range-summary" data-range-summary hidden>
+            <div class="cl-range-data">
+              <span>Shots <strong data-range-shots>0</strong></span>
+              <span>Hits <strong data-range-hits>0</strong></span>
+              <span>Centers <strong data-range-centers>0</strong></span>
+              <span>Accuracy <strong data-range-accuracy>0%</strong></span>
+              <span>Best streak <strong data-range-best>0</strong></span>
+            </div>
+            <p data-range-hint>Hit the plates at 6, 13 and 20 m. B opens the free arsenal.</p>
+          </div>
         </div>
         <div class="cl-decoy" hidden><kbd>G</kbd><span data-decoy-label></span></div>
         <div class="cl-bottom-left">
@@ -563,6 +591,14 @@ export class UI {
     this.nodes.required = query('[data-required]');
     this.nodes.level = query('[data-level]');
     this.nodes.highestCleared = query('[data-highest-cleared]');
+    this.nodes.relayRecord = query('[data-relay-record]');
+    this.nodes.range = query('[data-range-summary]');
+    this.nodes.rangeShots = query('[data-range-shots]');
+    this.nodes.rangeHits = query('[data-range-hits]');
+    this.nodes.rangeCenters = query('[data-range-centers]');
+    this.nodes.rangeAccuracy = query('[data-range-accuracy]');
+    this.nodes.rangeBest = query('[data-range-best]');
+    this.nodes.rangeHint = query('[data-range-hint]');
     this.nodes.victoryOperation = query('[data-victory-operation]');
     this.nodes.heading = query('[data-heading]');
     this.nodes.cardinal = query('[data-cardinal]');
@@ -620,9 +656,9 @@ export class UI {
   _bindEvents() {
     this.unsubscribers.push(
       subscribe(this.events, 'game:start', () => this.setScreen('playing')),
-      subscribe(this.events, 'armory:opened', ({ location, opening }) => {
+      subscribe(this.events, 'armory:opened', ({ location, preDeployment }) => {
         this.setScreen('armory');
-        this.armory.open(location, opening);
+        this.armory.open(location, preDeployment);
       }),
       subscribe(this.events, 'armory:closed', () => this.setScreen('playing')),
       subscribe(this.events, 'armory:changed', ({ message }) => this.armory.update(message)),
@@ -663,8 +699,9 @@ export class UI {
   }
 
   _action(action) {
-    if (action === 'start' || action === 'sweep' || action === 'armory-deploy') {
-      emit(this.events, 'game:start', { source: 'ui', mode: action === 'sweep' ? 'sweep' : 'relay', armory: action === 'armory-deploy' });
+    if (['start', 'sweep', 'armory-deploy', 'range'].includes(action)) {
+      const mode = action === 'sweep' ? 'sweep' : action === 'range' ? 'range' : 'relay';
+      emit(this.events, 'game:start', { source: 'ui', mode, armory: action === 'armory-deploy' });
       emit(this.events, 'audio:play', { name: 'ui-confirm' });
     } else if (action === 'armory-close') {
       emit(this.events, 'armory:close');
@@ -704,18 +741,33 @@ export class UI {
       screen.classList.toggle('is-visible', screen.dataset.screen === canonical);
     });
     this.nodes.hud.classList.toggle('is-hidden', canonical !== 'playing');
+    if (canonical !== 'playing' && canonical !== 'armory' && canonical !== 'capture') {
+      this.root.querySelector(`[data-screen="${canonical}"] .cl-btn.is-primary:not([hidden])`)
+        ?.focus({ preventScroll: true });
+    }
     if (canonical === 'victory' || canonical === 'defeat') {
       const screen = this.root.querySelector(`[data-screen="${canonical}"]`);
       const kills = Number(data?.kills ?? this.last.kills ?? 0);
       const elapsed = Number(data?.elapsed ?? this.last.elapsed ?? 0);
       screen.querySelector('[data-result-kills]').textContent = String(kills);
-      screen.querySelector('[data-result-time]').textContent = this._formatTime(elapsed);
+      screen.querySelector('[data-result-time]').textContent = this._formatTime(elapsed, Boolean(data.mission));
       screen.querySelector('[data-result-credits]').textContent = String(data?.economy?.earned ?? 0);
+      const relays = screen.querySelector('[data-result-relays]');
+      const summary = screen.querySelector('[data-result-summary]');
+      relays.hidden = !data.mission;
+      summary.hidden = !data.mission;
+      if (data.mission) {
+        relays.querySelector('strong').textContent = `${data.mission.completed} / ${data.mission.total}`;
+        summary.textContent = canonical === 'victory'
+          ? data.personalBest ? 'Personal best · Extracted from Ash Market' : 'Extracted from Ash Market'
+          : `Run ended at ${data.mission.target?.label ?? 'Ash Market'}`;
+      }
       if (canonical === 'victory') {
         const relay = data?.mode === 'relay';
         screen.querySelector('[data-action="next-level"]').hidden = relay;
         this.nodes.victoryOperation.textContent = relay ? 'RELAY RUN · EXTRACTED'
           : `OPERATION ${this.context.state.level} · DISTRICT SECURE`;
+        if (relay) screen.querySelector('[data-action="restart"]').focus({ preventScroll: true });
       }
     }
     if (data?.requiredKills !== undefined) {
@@ -736,6 +788,10 @@ export class UI {
     this.nodes.highestCleared.hidden = highest <= 0;
     this.nodes.highestCleared.textContent =
       highest > 0 ? `HIGHEST CLEARED · OPERATION ${highest}` : '';
+    const record = contextState.relayRecord;
+    this.nodes.relayRecord.hidden = !record;
+    this._text('relayRecord', record
+      ? `RELAY RUN · BEST ${this._formatTime(record.bestMilliseconds / 1000, true)} · ${record.clears} ${record.clears === 1 ? 'CLEAR' : 'CLEARS'}` : '');
   }
 
   render(snapshot = {}) {
@@ -784,6 +840,7 @@ export class UI {
     this._text('heading', String(Math.round(degrees)).padStart(3, '0'));
     this._text('cardinal', CARDINALS[Math.round(degrees / 45) % 8]);
     this._renderMission(state.mission, player, yaw);
+    this._renderRange(state.range);
 
     const now = performance.now();
     if (now > this.hitmarkerUntil) {
@@ -810,7 +867,7 @@ export class UI {
     this.nodes.ammoDisplay.hidden = Boolean(weapon.melee);
     const equipment = state.economy;
     if (!equipment) return;
-    this._text('fieldCredits', `${equipment.credits.toLocaleString('en-US')} CR`);
+    this._text('fieldCredits', state.range ? 'Practice' : `${equipment.credits.toLocaleString('en-US')} CR`);
     this.nodes.lockerHint.hidden = !state.armoryAvailable;
     for (const node of this.nodes.slots) {
       node.classList.toggle('is-equipped', node.dataset.weaponSlot === state.equippedSlot);
@@ -821,13 +878,26 @@ export class UI {
       const selected = node.dataset.pouch === state.throwable;
       if (available > 0) anyUtility = true;
       node.classList.toggle('is-selected', selected);
-      count.textContent = String(available);
+      count.textContent = state.range ? '∞' : String(available);
     }
     this.nodes.utility.hidden = !anyUtility;
     const action = weapon.reloading ? 'Reloading'
       : weapon.action === 'draw' ? 'Equipping'
         : weapon.action === 'bolt' ? 'Cycling' : '';
     this._text('reload', action);
+  }
+
+  _renderRange(range) {
+    this.nodes.range.hidden = !range;
+    if (!range) return;
+    this.nodes.sweepProgress.hidden = true;
+    this._text('objective', 'Practice range');
+    this._text('rangeShots', range.shots);
+    this._text('rangeHits', range.hits);
+    this._text('rangeCenters', range.centers);
+    this._text('rangeAccuracy', range.shots > 0 ? `${Math.round(100 * range.hits / range.shots)}%` : '0%');
+    this._text('rangeBest', range.best);
+    this._text('rangeHint', range.last || 'Hit the plates at 6, 13 and 20 m. B opens the free arsenal.');
   }
 
   _renderMission(mission, player, yaw) {
@@ -945,11 +1015,13 @@ export class UI {
     this.announce(announcement, 'neutral', 1.4);
   }
 
-  _formatTime(seconds) {
-    const total = Math.max(0, Math.floor(seconds));
+  _formatTime(seconds, precise = false) {
+    const tenths = Math.max(0, Math.floor(seconds * 10 + 1e-7));
+    const total = Math.floor(tenths / 10);
     const minutes = Math.floor(total / 60);
     const remainder = total % 60;
-    return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+    const time = `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+    return precise ? `${time}.${tenths % 10}` : time;
   }
 
   dispose() {

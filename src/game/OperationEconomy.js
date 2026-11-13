@@ -20,10 +20,12 @@ export class OperationEconomy {
     this.defaults = defaults;
     this.canUseService = canUseService;
     this.state = {};
+    this.practice = false;
     this.resetCampaign();
   }
 
   resetCampaign() {
+    this.practice = false;
     this.checkpoint = {
       credits: OPENING_CREDITS,
       owned: Object.values(this.defaults),
@@ -31,6 +33,17 @@ export class OperationEconomy {
       supplies: {},
     };
     this.retry();
+  }
+
+  startPractice() {
+    this.resetCampaign();
+    this.practice = true;
+    for (const item of this.catalog) {
+      if (item.slot && !this.state.owned.includes(item.id)) this.state.owned.push(item.id);
+      if (item.kind === 'throwable') this.state.supplies[item.id] = item.max;
+    }
+    this.state.credits = 0;
+    this.saveCheckpoint();
   }
 
   saveCheckpoint() {
@@ -55,6 +68,8 @@ export class OperationEconomy {
     if (item.slot && equipped[item.slot] === id) return { allowed: false, label: 'Equipped' };
     if (item.slot && owned.includes(id)) return { allowed: true, label: 'Equip' };
     if (item.kind === 'service' && !this.canUseService(id)) return { allowed: false, label: 'Reserve full' };
+    if (this.practice) return item.kind === 'throwable'
+      ? { allowed: false, label: 'Unlimited' } : { allowed: true, label: 'Refill' };
     if (item.kind === 'throwable') {
       if ((supplies[id] ?? 0) >= item.max) return { allowed: false, label: 'At item limit' };
       const total = Object.values(supplies).reduce((sum, count) => sum + count, 0);
@@ -69,7 +84,7 @@ export class OperationEconomy {
     if (!this.quote(id).allowed) return false;
     const item = this.items.get(id);
     const { owned, equipped, supplies } = this.state;
-    const cost = item.slot && owned.includes(id) ? 0 : item.price;
+    const cost = this.practice || (item.slot && owned.includes(id)) ? 0 : item.price;
     this.state.credits -= cost;
     this.state.spent += cost;
     if (item.slot) {
@@ -83,7 +98,7 @@ export class OperationEconomy {
 
   use(id) {
     if (!(this.state.supplies[id] > 0)) return false;
-    this.state.supplies[id] -= 1;
+    if (!this.practice) this.state.supplies[id] -= 1;
     return true;
   }
 

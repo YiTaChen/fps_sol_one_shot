@@ -44,7 +44,7 @@ function plantedAnkleHeight(pitch) {
 }
 
 export function poseSoldierLeg(leg, side, stride, motion, aim, hipHeight, hipSway, pose) {
-  const { crouch, sliding, airborne, strafe, forward, speed, cadence, runWeight, heading } = pose;
+  const { crouch, sliding, airborne, strafe, forward, speed, cadence, runWeight, heading, turning, hipBack } = pose;
   const phase = THREE.MathUtils.euclideanModulo(stride / (Math.PI * 2) + (side > 0 ? 0.5 : 0), 1);
   const stance = 0.61 - motion * 0.075 - runWeight * 0.25;
   const swing = Math.max(0, (phase - stance) / (1 - stance));
@@ -54,7 +54,9 @@ export function poseSoldierLeg(leg, side, stride, motion, aim, hipHeight, hipSwa
   const travel = phase < stance
     ? THREE.MathUtils.lerp(-reach, reach, phase / stance)
     : THREE.MathUtils.lerp(reach, -reach, THREE.MathUtils.smoothstep(swing, 0, 1));
-  const lift = Math.sin(Math.PI * swing) ** 1.2 * motion * (0.116 - crouch * 0.053);
+  const lift = Math.sin(Math.PI * swing) ** 1.2 * (
+    motion * (0.116 - crouch * 0.053) + turning * 0.062
+  );
   const heelStrike = 1 - THREE.MathUtils.smoothstep(phase, 0, 0.115);
   const pushOff = THREE.MathUtils.smoothstep(phase, stance * 0.74, stance);
   const pitch = motion * forward * (phase < stance
@@ -70,7 +72,7 @@ export function poseSoldierLeg(leg, side, stride, motion, aim, hipHeight, hipSwa
   const footY = plantedAnkleHeight(pitch) + lift + airborne * (side < 0 ? 0.18 : 0.08);
   const hipLane = side * LEG_DIMENSIONS.hipSpacing;
   const hip = leg.upperPivot.position.set(
-    hipLane * cosine + hipSway, hipHeight, -hipLane * sine + side * aim * 0.018,
+    hipLane * cosine + hipSway, hipHeight, -hipLane * sine + side * aim * 0.018 + hipBack,
   );
 
   hipToFoot.set(footX - hip.x, footY - hip.y, footZ - hip.z);

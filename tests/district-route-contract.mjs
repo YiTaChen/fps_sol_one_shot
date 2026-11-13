@@ -11,13 +11,14 @@ const STANDING_CAPSULE = {
   maxStepHeight: 0.44,
   canStep: true,
 };
+const STEP_LENGTH = 0.119;
 
 function walkTo(physics, position, x, z) {
   const destination = new THREE.Vector3(x, 0, z);
   const movement = new THREE.Vector3();
-  const maxSteps = Math.ceil(position.distanceTo(destination) / 0.085) + 60;
+  const maxSteps = Math.ceil(position.distanceTo(destination) / STEP_LENGTH) + 60;
   for (let step = 0; step < maxSteps; step += 1) {
-    movement.subVectors(destination, position).setY(0).clampLength(0, 0.085);
+    movement.subVectors(destination, position).setY(0).clampLength(0, STEP_LENGTH);
     movement.y = -0.09;
     physics.moveCapsule(position, movement, STANDING_CAPSULE);
     if (Math.hypot(position.x - x, position.z - z) < 0.015) {
@@ -26,6 +27,20 @@ function walkTo(physics, position, x, z) {
     }
   }
   assert.fail(`Route to (${x}, ${z}) was blocked at (${position.x.toFixed(2)}, ${position.z.toFixed(2)})`);
+}
+
+function walkRoute(physics, position, waypoints) {
+  for (const [x, z] of waypoints) walkTo(physics, position, x, z);
+}
+
+function assertVisibleGuide(world, active) {
+  world.setRouteStatus(active);
+  const visible = new Set();
+  world.root.traverse((object) => {
+    const match = /^route-paint:([^:]+):/.exec(object.name);
+    if (match && object.visible) visible.add(match[1]);
+  });
+  assert.deepEqual([...visible], active ? [active] : [], 'Inactive route paint remained visible');
 }
 
 function checkRoute(seed) {
@@ -45,13 +60,15 @@ function checkRoute(seed) {
     const position = world.relaySpawn.position.clone();
     const routes = [
       [[-43.15, -0.5], [-43.15, -11.2], [-41.25, -13.4]],
-      [[-41.25, -22.5], [-41.25, -29.1], [9.2, -29.1], [11.5, -30.55], [18, -30.55]],
+      [[-41.25, -22.5], [-41.25, -29.1], [9.4, -29.1], [9.4, -30.75], [18, -30.75]],
       [[18, -30.55], [39.4, -30.55], [39.4, -26.3], [38.8, -25.8], [38.8, -14.7], [36, -10.2]],
       [[36, -8.7], [37.52, -8], [37.52, 0.8], [-17.55, 0.8], [-17.55, 7.4], [-19.5, 8.8]],
     ];
 
+    assertVisibleGuide(world, null);
     for (const [index, objective] of objectives.entries()) {
-      for (const [x, z] of routes[index]) walkTo(physics, position, x, z);
+      assertVisibleGuide(world, objective.id);
+      walkRoute(physics, position, routes[index]);
       walkTo(physics, position, objective.position.x, objective.position.z);
     }
 
@@ -61,12 +78,24 @@ function checkRoute(seed) {
     const arcadePower = world.setPowerStage(1);
     assert.equal(isClosed('saffron-arcade'), false);
     assert.equal(isClosed('kiln-house'), true);
-    walkTo(physics, arcadePower.alertPosition, -33.2, -18.4);
+    const arcade = world.route[0].position.clone();
+    walkRoute(physics, arcade, [
+      [-38.5, -18.4], [-32.6, -18.4], [-29.45, -18.4], [-29.45, -19.9],
+      [-29.45, -29.1], [-26, -29.1],
+    ]);
+    assert.equal(arcadePower.label, 'Saffron maintenance shutter');
     const kilnPower = world.setPowerStage(2);
     assert.equal(isClosed('kiln-house'), false);
-    walkTo(physics, kilnPower.alertPosition, 25.65, -11.25);
+    const kiln = world.route[1].position.clone();
+    walkRoute(physics, kiln, [
+      [18, -30.55], [21.8, -30.55], [22.15, -27], [22.15, -23.5], [22.4, -12],
+      [22.85, -11.25], [25.55, -11.25], [25.55, -9.35], [27.65, -9.35], [31, -10.2],
+      [34.5, -10.2],
+    ]);
+    assert.equal(kilnPower.label, 'Kiln west loading shutter');
     assert.equal(world.setPowerStage(3).label, 'Cross Street extraction beacon');
     world.setPowerStage(0);
+    assertVisibleGuide(world, null);
     assert.equal(isClosed('saffron-arcade'), true);
     assert.equal(isClosed('kiln-house'), true);
 
@@ -79,10 +108,10 @@ function checkRoute(seed) {
 export function runDistrictRouteContract() {
   // The shipped URL and browser capture fixtures use different base seeds.
   const seeds = [20364033, 0x0c1de71e];
-  return { locations: Math.min(...seeds.map(checkRoute)), seeds: seeds.length };
+  return { locations: Math.min(...seeds.map(checkRoute)), seeds: seeds.length, shortcuts: 2 };
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const result = runDistrictRouteContract();
-  process.stdout.write(`Traversed ${result.locations} route locations across ${result.seeds} seeds.\n`);
+  process.stdout.write(`Traversed ${result.locations} route locations and ${result.shortcuts} shortcuts across ${result.seeds} seeds.\n`);
 }

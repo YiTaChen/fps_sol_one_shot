@@ -953,8 +953,9 @@ export class AudioSystem {
   }
 
   setMasterVolume(value) {
+    this.options.volume = clamp(value, 0, 1);
     if (!this.master || !this.context) return;
-    this.master.gain.setTargetAtTime(clamp(value, 0, 1), this.context.currentTime, 0.035);
+    this.master.gain.setTargetAtTime(this.options.volume, this.context.currentTime, 0.035);
   }
 
   reset() {

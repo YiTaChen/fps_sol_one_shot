@@ -29,7 +29,7 @@ ship with the build. [Material provenance](artifacts/material-provenance.md)
 | **Engine** | Three.js `0.180.0`, WebGL2, Web Audio |
 | **World** | Authored Ash Market layout with deterministic procedural assembly and dressing |
 | **Simulation** | Fixed `1 / 60 s` gameplay step with isolated seeded RNG streams |
-| **Modes** | Relay Run and Endless Sweep with `7 × operation` total hostiles |
+| **Modes** | Relay Run, Endless Sweep, and Practice Range |
 | **Armory** | Six weapons, three throwables, reserve ammunition, and in-game credits |
 | **Assets** | Blender exterior mesh, authored PBR textures and procedural world assets |
 
@@ -48,6 +48,20 @@ and finally lights the Cross Street extraction beacon. Each relay also charges
 a remote decoy. Press **G** when you want the last powered station to emit an
 audible signal after a short delay. Up to two eligible patrols can investigate
 its location while you move through a different route.
+
+Follow the active station's paint and signs. Powered doors open alternate
+paths at Saffron Arcade and Kiln House. The debrief shows how many relays
+you restored, elapsed time, and credits earned. The main menu remembers
+your fastest extraction and total clears on the current browser.
+See [the operation review](artifacts/operation-review.md) for the current
+route, practice, and extraction captures.
+
+### Practice Range
+
+Choose **Practice range** to try the six weapons and three utilities with no
+enemies or equipment costs. Aim at the 6, 13, and 20 m plates. The range tracks
+shots, hits, center hits, accuracy, and best streak. Press **B** anywhere in
+the range to switch gear. Practice purchases and stats belong to that session.
 
 ### Endless Sweep
 
@@ -153,8 +167,8 @@ quality preset, SHA-256 hashes, combat state, and browser diagnostics.
 ## Controls
 
 Click **Deploy** or **Endless Sweep** to enable pointer-lock aiming and browser
-audio. The start and pause menus provide mouse speed, aim speed and reduced
-camera sway settings, saved in the browser.
+audio. The start and pause menus save mouse speed, aim speed, reduced
+camera sway, master volume, and graphics quality in the browser.
 
 | Input | Action |
 |---|---|

@@ -8,7 +8,7 @@ const params = new URLSearchParams(window.location.search);
 const seedValue = Number.parseInt(params.get("seed") || "20364033", 10);
 const options = {
   seed: Number.isFinite(seedValue) ? seedValue : 20364033,
-  quality: params.get("quality") || (params.has("capture") ? "high" : "medium"),
+  quality: params.get("quality") || (params.has("capture") ? "high" : undefined),
   capture: params.has("capture"),
   captureMode: params.get("capture"),
   test: params.get("test") === "1",

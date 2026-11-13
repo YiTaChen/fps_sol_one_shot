@@ -134,7 +134,7 @@ export class Armory {
       <div class="cl-armory-shell">
         <header class="cl-armory-header">
           <div><p class="cl-armory-location" data-armory-location></p><h1>Armory</h1></div>
-          <div class="cl-armory-credit"><strong data-armory-credits>1400</strong>Credits</div>
+          <div class="cl-armory-credit"><strong data-armory-credits>1400</strong><span data-armory-credit-label>Credits</span></div>
         </header>
         <div class="cl-armory-body">
           <div class="cl-armory-groups"></div>
@@ -165,6 +165,7 @@ export class Armory {
         </div>
         <footer class="cl-armory-footer">
           <p class="cl-armory-message" role="status"></p>
+          <button class="cl-btn" data-action="menu" data-armory-back hidden>Back to menu</button>
           <button class="cl-btn is-primary" data-action="armory-close">Return to field</button>
         </footer>
       </div>
@@ -172,9 +173,11 @@ export class Armory {
     const query = (selector) => this.root.querySelector(selector);
     this.groups = query('.cl-armory-groups');
     this.credits = query('[data-armory-credits]');
+    this.creditLabel = query('[data-armory-credit-label]');
     this.location = query('[data-armory-location]');
     this.message = query('.cl-armory-message');
     this.continueButton = query('[data-action="armory-close"]');
+    this.backButton = query('[data-armory-back]');
     this.inspector = query('.cl-armory-inspector');
     this.fallback = query('.cl-armory-fallback');
     this.orbit = query('.cl-armory-rotate');
@@ -254,9 +257,11 @@ export class Armory {
     return card;
   }
 
-  open(location, opening) {
+  open(location, preDeployment) {
     this.location.textContent = location;
-    this.continueButton.textContent = opening ? 'Deploy with loadout' : 'Return to field';
+    this.continueButton.textContent = this.economy.practice ? 'Return to range'
+      : preDeployment ? 'Deploy with loadout' : 'Return to field';
+    this.backButton.hidden = !preDeployment;
     this.message.textContent = 'Choose an item to inspect it.';
     this.selected = null;
     this.select(this.economy.state.equipped.primary);
@@ -297,7 +302,8 @@ export class Armory {
   update(message) {
     if (message !== undefined) this.message.textContent = message;
     const { credits, equipped, owned, supplies } = this.economy.state;
-    this.credits.textContent = credits.toLocaleString('en-US');
+    this.credits.textContent = this.economy.practice ? 'FREE' : credits.toLocaleString('en-US');
+    this.creditLabel.textContent = this.economy.practice ? 'Practice gear' : 'Credits';
     for (const { item, card, product, buy } of this.cards) {
       const inspecting = item.id === this.selected?.id;
       card.dataset.inspected = String(inspecting);

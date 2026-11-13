@@ -27,6 +27,8 @@ import { WorldBuilder } from "../world/WorldBuilder.js";
 import { normalizeControls, readControls, saveControls } from "./ControlSettings.js";
 import { RELAY_PATROLS, RelayMission } from "./RelayMission.js";
 import { CREDIT_REWARDS, OperationEconomy } from "./OperationEconomy.js";
+import { PracticeRange, RANGE_SPAWN } from "./PracticeRange.js";
+import { readRelayRecord, recordExtraction } from "./RelayRecord.js";
 import {
   deriveLevelSeed,
   readHighestClearedLevel,
@@ -175,9 +177,10 @@ export class Game {
     this.clock = new FixedClock(FIXED_STEP);
     this.diagnostics = new Diagnostics();
     this.physics = new PhysicsWorld();
+    const controls = readControls();
     this.rendering = new RendererSystem(
       container,
-      options.quality || "high",
+      options.quality ?? controls.quality,
     );
     if (options.exchangeAsset) this.rendering.installExchange(options.exchangeAsset);
     this.economy = new OperationEconomy(
@@ -191,13 +194,16 @@ export class Game {
     this.state = {
       economy: this.economy.state,
       armoryAvailable: false,
+      preDeployment: false,
+      range: null,
+      relayRecord: readRelayRecord(),
       shoulderView: false,
       equippedSlot: "primary",
       throwable: "pulse",
       phase: "menu",
       mode: "sweep",
       mission: null,
-      controls: readControls(),
+      controls,
       level: 1,
       baseEnemyCount: BASE_ENEMY_COUNT,
       highestClearedLevel: readHighestClearedLevel(),
@@ -249,6 +255,7 @@ export class Game {
       physics: this.physics,
     });
     this.world = this.worldBuilder.build(this.context);
+    this.range = new PracticeRange(this.context);
     this.context.assets.world = this.world;
     this.relayMission = this.world.route?.length && this.world.extraction
       ? new RelayMission(this.world.route, this.world.extraction)
@@ -321,7 +328,7 @@ export class Game {
     this.enemies.isStunned = (id) => this.throwables.isStunned(id);
     this.state.requiredKills = BASE_ENEMY_COUNT;
 
-    this.audio = new AudioSystem();
+    this.audio = new AudioSystem({ volume: this.state.controls.volume / 100 });
     this.audio.init(this.context);
     this.ui = new UI({
       container: document.body,
@@ -346,7 +353,8 @@ export class Game {
     window.addEventListener("keydown", (event) => {
       if (this.state.phase === "armory" && event.code === "Escape") {
         event.preventDefault();
-        this.closeArmory();
+        if (this.state.preDeployment) this.events.emit("game:menu", { source: "armory-back" });
+        else this.closeArmory();
       }
     }, { signal });
     window.addEventListener("blur", () => {
@@ -373,15 +381,24 @@ export class Game {
       this.events.on("game:restart", () => this.applyRestart()),
       this.events.on("game:next-level", () => this.advanceLevel()),
       this.events.on("quality:change", (event) =>
-        this.applyQuality(event?.name ?? event?.preset ?? event)),
+        this.applyQuality(event?.name ?? event?.preset ?? event, event?.source === "ui")),
       this.events.on("input:pointer-lock", ({ locked }) => {
         if (!locked && this.state.phase === "playing" && !this.options.capture) {
           this.events.emit("game:pause", { source: "pointer-lock-loss" });
         }
       }),
       this.events.on("weapon:fire", (shot) => {
-        if (shot.kind !== "enemy") this.inOpeningArea = false;
+        if (shot.kind !== "enemy") {
+          this.inOpeningArea = false;
+          if (this.range.active) this.range.fire();
+        }
       }),
+      this.events.on("projectile:impact", (event) => {
+        if (this.range.impact(event)) {
+          this.events.emit("combat:hitmarker", { headshot: event.hitZone === "center" });
+        }
+      }),
+      this.events.on("projectile:expired", (event) => this.range.miss(event.owner)),
       this.events.on("weapon:melee", () => { this.inOpeningArea = false; }),
       this.events.on("player:damage", () => {
         this.inOpeningArea = false;
@@ -398,19 +415,24 @@ export class Game {
       this.applyRestart();
       return;
     }
-    this.state.mode = mode === "relay" && this.relayMission ? "relay" : "sweep";
+    this.state.mode = mode === "range" ? "range" : mode === "relay" && this.relayMission ? "relay" : "sweep";
     this.state.mission = this.state.mode === "relay" ? this.relayMission.state : null;
-    const spawn = this.state.mode === "relay" ? this.world.relaySpawn : this.world.spawn;
+    const practice = this.state.mode === "range";
+    const spawn = practice ? RANGE_SPAWN : this.state.mode === "relay" ? this.world.relaySpawn : this.world.spawn;
     this.player.setSpawn(spawn.position, spawn.yaw);
-    this.economy.resetCampaign();
+    if (practice) this.economy.startPractice();
+    else this.economy.resetCampaign();
     this._resetRound({ deferPointerLock: startInArmory });
     this.audio.resume();
-    if (startInArmory) this.openArmory();
+    if (startInArmory) this.openArmory({ preDeployment: true });
   }
 
   returnToMenu() {
     this.cancelThrow();
     this.state.phase = "menu";
+    this.state.preDeployment = false;
+    this.state.range = null;
+    this.range.stop();
     this.state.shoulderView = false;
     this.state.mode = "sweep";
     this.state.mission = null;
@@ -444,6 +466,7 @@ export class Game {
   applyControls(settings) {
     this.state.controls = normalizeControls(settings);
     this.player.applyControls(this.state.controls);
+    this.audio.setMasterVolume(this.state.controls.volume / 100);
     saveControls(this.state.controls);
   }
 
@@ -499,10 +522,12 @@ export class Game {
 
   _resetRound({ deferPointerLock = false } = {}) {
     this.cancelThrow();
+    const practice = this.state.mode === "range";
     this.state.phase = "playing";
+    this.state.preDeployment = false;
     this.state.kills = 0;
     this.state.elapsed = 0;
-    this.state.requiredKills = this._enemyCountForLevel();
+    this.state.requiredKills = practice ? 0 : this._enemyCountForLevel();
     this.relayMission?.reset();
     this.setDistrictPowerStage(0);
     this.syncRelaySignals();
@@ -527,6 +552,9 @@ export class Game {
       placements: this.state.mode === "relay" ? RELAY_PATROLS : null,
       announce: this.state.mode === "sweep",
     });
+    if (practice) this.range.start();
+    else this.range.stop();
+    this.state.range = practice ? this.range.state : null;
     this.player.setEnabled(true);
     this.rifle.setEnabled(true);
     this.input.enabled = true;
@@ -564,6 +592,7 @@ export class Game {
   }
 
   armoryLocation() {
+    if (this.state.mode === "range") return "Practice locker";
     const position = this.player.position;
     const atDeployment = position.distanceTo(this.player.spawnPosition) <= ARMORY_RADIUS;
     const unlocked = this.state.mission?.completed ?? 0;
@@ -576,7 +605,7 @@ export class Game {
     return atDeployment ? "Deployment locker" : `${station.label} field locker`;
   }
 
-  openArmory() {
+  openArmory({ preDeployment = false } = {}) {
     if (this.state.phase !== "playing") return false;
     const location = this.armoryLocation();
     if (!location) {
@@ -585,6 +614,7 @@ export class Game {
     }
     this.cancelThrow();
     this.state.phase = "armory";
+    this.state.preDeployment = preDeployment;
     this.relayMission?.clearHold();
     this.player.setEnabled(false);
     this.rifle.setEnabled(false);
@@ -592,13 +622,14 @@ export class Game {
     this.input.reset();
     this.input.exitPointerLock();
     this.clock.clearAccumulator();
-    this.events.emit("armory:opened", { location, opening: this.inOpeningArea });
+    this.events.emit("armory:opened", { location, preDeployment });
     return true;
   }
 
   closeArmory() {
     if (this.state.phase !== "armory") return false;
     this.state.phase = "playing";
+    this.state.preDeployment = false;
     this.player.setEnabled(true);
     this.rifle.equip();
     this.input.enabled = true;
@@ -617,7 +648,7 @@ export class Game {
     if (item.kind === "service") {
       for (const weaponId of this.economy.state.owned) this.weaponInstances.get(weaponId)?.restockReserve();
     }
-    if (this.inOpeningArea) this.economy.saveCheckpoint();
+    if (this.inOpeningArea || this.state.mode === "range") this.economy.saveCheckpoint();
     this.events.emit("audio:play", { name: "ui-confirm", volume: 0.7 });
     this.events.emit("armory:changed", {
       message: item.kind === "service" ? "Reserve ammunition restocked"
@@ -699,10 +730,14 @@ export class Game {
     this.rifle.equip();
   }
 
-  applyQuality(name) {
+  applyQuality(name, persist = false) {
     if (!["low", "medium", "high"].includes(name)) return;
     this.context.quality = this.rendering.applyQuality(name);
     this.state.quality = this.context.quality.name;
+    if (persist) {
+      this.state.controls.quality = name;
+      saveControls(this.state.controls);
+    }
   }
 
   onEnemyDeath() {
@@ -722,6 +757,7 @@ export class Game {
   finishMatch(result) {
     this.cancelThrow();
     this.state.phase = result;
+    let personalBest = false;
     if (result === "victory") this.economy.reward(CREDIT_REWARDS.victory);
     if (result === "victory" && this.state.mode === "sweep") {
       const persisted = writeHighestClearedLevel(this.state.level);
@@ -730,6 +766,11 @@ export class Game {
         persisted,
         this.state.level,
       );
+    }
+    if (result === "victory" && this.state.mode === "relay") {
+      const extraction = recordExtraction(this.state.relayRecord, this.state.elapsed);
+      this.state.relayRecord = extraction.record;
+      personalBest = extraction.personalBest;
     }
     this.player.setEnabled(false);
     this.rifle.setEnabled(false);
@@ -745,6 +786,8 @@ export class Game {
       mode: this.state.mode,
       mission: this.state.mission,
       economy: this.economy.snapshot(),
+      personalBest,
+      relayRecord: this.state.relayRecord,
     });
   }
 
@@ -768,6 +811,7 @@ export class Game {
     this.throwables.fixedUpdate(dt);
     this.enemies.fixedUpdate(dt);
     this.effects.fixedUpdate(dt);
+    if (this.range.active) this.range.update(dt);
     if (this.state.phase === "playing" && this.state.mission) {
       this.updateRelayMission(dt);
     }
@@ -1204,6 +1248,8 @@ export class Game {
     return {
       phase: this.state.phase,
       mode: this.state.mode,
+      range: this.state.range ? { ...this.state.range } : null,
+      relayRecord: this.state.relayRecord,
       mission: this.state.mission ? structuredClone(this.state.mission) : null,
       level: this.state.level,
       baseEnemyCount: this.state.baseEnemyCount,
@@ -1372,6 +1418,7 @@ export class Game {
     this.ui.dispose();
     this.audio.dispose();
     this.throwables.dispose();
+    this.range.dispose();
     this.cancelThrow();
     this.throwView.removeFromParent();
     this.playerAvatar.dispose();

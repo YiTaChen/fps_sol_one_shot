@@ -17,7 +17,7 @@ import { runPhysicsStepContract } from '../tests/physics-step-contract.mjs';
 import { runProgressionContract } from '../tests/progression-contract.mjs';
 import { runRelayAndInputContract } from '../tests/relay-and-input-contract.mjs';
 import { runDistrictRouteContract } from '../tests/district-route-contract.mjs';
-import { runArmoryContract, runBrowserArmoryContract } from '../tests/armory-contract.mjs';
+import { runArmoryContract, runBrowserArmoryContract, runPracticeContract } from '../tests/armory-contract.mjs';
 import { runThrowablesContract } from '../tests/throwables-contract.mjs';
 import { runArsenalContract } from '../tests/arsenal-contract.mjs';
 
@@ -514,6 +514,8 @@ async function main() {
 
     await runBrowserArmoryContract(page);
     pass('browser armory and combat', '10 item images, zoom, purchases, shoulder equipment, scope, melee, and utility release');
+    await runPracticeContract(page);
+    pass('practice range and deployment', 'target hit, free equipment, safe return, and isolated economy');
 
     const internalDiagnostics = await page.evaluate(
       () => window.__FPS_TEST__.diagnostics(),

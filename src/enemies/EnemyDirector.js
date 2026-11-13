@@ -380,7 +380,7 @@ export class EnemyDirector {
     this.paused = false;
     this._shotSerial = 0;
     this.totalCount = Math.max(
-      1,
+      0,
       Math.floor(config.totalCount ?? config.count ?? this.enemyCount),
     );
     this.activeLimit = Math.max(
@@ -418,7 +418,7 @@ export class EnemyDirector {
       this._spawnEnemy(id, spawnStream, false);
     }
 
-    if (config.announce !== false) {
+    if (config.announce !== false && this.totalCount > 0) {
       emit(this.events, 'ui:announce', {
         text: `HOSTILES ACTIVE · ${this.totalCount}`,
         tone: 'warning',

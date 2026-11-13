@@ -3,6 +3,8 @@ const STORAGE_KEY = 'cinderline.controls.v1';
 export const DEFAULT_CONTROLS = Object.freeze({
   sensitivity: 100,
   adsSensitivity: 65,
+  volume: 72,
+  quality: "medium",
   reducedMotion: false,
 });
 
@@ -14,6 +16,8 @@ export function normalizeControls(settings) {
   return {
     sensitivity: boundedNumber(settings?.sensitivity, DEFAULT_CONTROLS.sensitivity, 20, 220),
     adsSensitivity: boundedNumber(settings?.adsSensitivity, DEFAULT_CONTROLS.adsSensitivity, 25, 100),
+    volume: boundedNumber(settings?.volume, DEFAULT_CONTROLS.volume, 0, 100),
+    quality: ["low", "medium", "high"].includes(settings?.quality) ? settings.quality : DEFAULT_CONTROLS.quality,
     reducedMotion: settings?.reducedMotion === true,
   };
 }

@@ -140,6 +140,7 @@ export class ProjectileSystem {
     }
     if (!projectile) {
       projectile = oldest;
+      this._emitMiss(projectile);
       this._deactivate(projectile);
     }
 
@@ -239,6 +240,7 @@ export class ProjectileSystem {
           || projectile.energy < 0.08
         )
       ) {
+        this._emitMiss(projectile);
         this._deactivate(projectile);
       }
     }
@@ -338,6 +340,11 @@ export class ProjectileSystem {
     projectile.active = false;
     projectile.owner = null;
     this.activeCount = Math.max(0, this.activeCount - 1);
+  }
+
+  _emitMiss(projectile) {
+    if (this.context?.state?.mode !== 'range') return;
+    emit(this.events, 'projectile:expired', { owner: projectile.owner });
   }
 
   _syncSnapshot() {

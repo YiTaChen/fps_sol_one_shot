@@ -16,7 +16,7 @@ const ROUTE = [
     id: 'service',
     code: '02',
     label: 'North Service',
-    description: 'Take the rear door or the powered side shutter, then head east.',
+    description: 'Follow the cyan marks east. The rear exit and powered side shutter both reach the road.',
     accent: '#77e4ec',
     position: [18, 0, -29.1],
     console: [19.65, 0, -29.1],
@@ -26,7 +26,7 @@ const ROUTE = [
     id: 'kiln',
     code: '03',
     label: 'Kiln House',
-    description: 'Look for the coral freight gate on the north side of the kiln.',
+    description: 'Follow the coral marks into the powered loading shutter, or take the outer freight road.',
     accent: '#ff9a80',
     position: [34.5, 0, -10.2],
     console: [34.5, 0, -11.8],
@@ -36,7 +36,7 @@ const ROUTE = [
     id: 'extraction',
     code: 'EX',
     label: 'Cross Street',
-    description: 'Leave through the freight bay and reach the green extraction post.',
+    description: 'Leave through the freight bay and follow the green marks west to Cross Street.',
     accent: '#a4efb1',
     position: [-21.7, 0, 12],
     console: [-23.25, 0, 12],
@@ -54,24 +54,41 @@ const SIGNS = [
   ['extraction', 'EXTRACTION', 'CROSS STREET', -23.25, 2.27, 12, Math.PI * 0.5, 2.42],
 ];
 
+// These panels face each approach so the next turn is visible at eye level.
+const DIRECTION_SIGNS = [
+  ['service', 'NORTH SERVICE', 'SERVICE ROAD • TURN LEFT', -28.82, 2.06, -19.82, -Math.PI * 0.5, 2.12],
+  ['service', 'NORTH SERVICE', 'SERVICE ROAD • TURN RIGHT', -41.26, 2.72, -33.3, 0, 2.22],
+  ['kiln', 'KILN LOADING', 'TURN RIGHT • POWERED SHUTTER', 23.25, 2.06, -28.9, -Math.PI * 0.5, 2.4],
+  ['kiln', 'FREIGHT ROAD', 'STRAIGHT • OUTER APPROACH', 24.4, 2.54, -32.45, -Math.PI * 0.5, 2.18],
+  ['kiln', 'KILN LOADING', 'ENTER AT THE LIT SHUTTER', 24.28, 2.98, -11.25, -Math.PI * 0.5, 2.2],
+  ['extraction', 'CROSS STREET', 'WEST • FOLLOW GREEN MARKS', 33.25, 2.8, -3.63, 0, 2.75],
+  ['extraction', 'EXTRACTION', 'TURN LEFT • CROSS STREET', -18.68, 2.32, 2.62, Math.PI * 0.5, 2.32],
+];
+
 const PAINTED_ROUTES = {
   arcade: [
     [[-43.15, -0.5], [-43.15, -11.2], [-41.25, -13.4], [-41.25, -21.2]],
   ],
   service: [
-    [[-41.25, -23.2], [-41.25, -29.1], [-26, -29.1]],
+    [[-41.25, -21.3], [-41.25, -29.1], [-26, -29.1]],
+    [[-38.5, -18.4], [-29.45, -18.4], [-29.45, -29.1]],
     [[-20, -29.1], [-4, -29.1]],
-    [[4.5, -29.1], [9.2, -29.1], [11.5, -30.55], [18, -30.55], [18, -29.1]],
-    [[19.4, -30.55], [39.4, -30.55], [39.4, -26.3], [38.8, -25.8]],
+    [[4.5, -29.1], [9.4, -29.1], [9.4, -30.75], [18, -30.75], [18, -29.1]],
   ],
   kiln: [
-    [[38.8, -25.8], [38.8, -14.7], [36, -10.2], [34.5, -10.2]],
-    [[34.5, -10.2], [36, -8.7], [37.52, -8], [37.52, -6.2]],
+    [[18, -29.1], [18, -30.55], [21.8, -30.55], [22.15, -27], [22.15, -23.5], [22.4, -12],
+      [22.85, -11.25], [25.55, -11.25], [25.55, -9.35], [27.65, -9.35], [31, -10.2], [34.5, -10.2]],
   ],
   extraction: [
-    [[-17.55, 1.7], [-17.55, 7.4], [-19.5, 8.8], [-21.7, 12]],
+    [[34.5, -10.2], [36, -8.7], [37.52, -8], [37.52, 0.8], [24, 0.8], [13, 0.8], [-17.55, 0.8],
+      [-17.55, 7.4], [-19.5, 8.8], [-21.7, 12]],
   ],
 };
+
+const OUTER_KILN_ROUTE = [
+  [21.8, -30.55], [39.4, -30.55], [39.4, -26.3], [38.8, -25.8],
+  [38.8, -14.7], [36, -10.2], [34.5, -10.2],
+];
 
 function routeLocation(definition) {
   return Object.freeze({
@@ -90,7 +107,9 @@ export class DistrictRoute {
     this.materials = new Set();
     this.textures = new Set();
     this.markings = [];
+    this.stageGuide = new Map();
     this.plane = new THREE.PlaneGeometry(1, 1);
+    this.paintPlane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
     this.indicators = new Map();
     this.routeRoot = new THREE.Group();
     this.routeRoot.name = 'District route landmarks';
@@ -119,12 +138,25 @@ export class DistrictRoute {
       const location = ROUTE.find((entry) => entry.id === id);
       this.buildSign(location, title, subtext, [x, y, z], yaw, width);
     }
+    for (const [id, title, subtext, x, y, z, yaw, width] of DIRECTION_SIGNS) {
+      const location = ROUTE.find((entry) => entry.id === id);
+      const sign = this.buildSign(location, title, subtext, [x, y, z], yaw, width);
+      for (const side of [-1, 1]) {
+        this.box(sign, this.casing, [0.064, y, 0.067], [side * width * 0.39, -y * 0.5, -0.075]);
+      }
+      this.addGuide(id, sign);
+    }
     this.setStatus(null);
   }
 
   own(material) {
     this.materials.add(material);
     return material;
+  }
+
+  addGuide(id, guide) {
+    if (!this.stageGuide.has(id)) this.stageGuide.set(id, []);
+    this.stageGuide.get(id).push(guide);
   }
 
   box(parent, material, size, position) {
@@ -193,11 +225,11 @@ export class DistrictRoute {
     this.box(sign, this.casing, [width, height, 0.12], [0, 0, 0]);
     this.box(sign, this.hardware, [width * 0.94, 0.032, 0.14], [0, -height * 0.46, 0.007]);
     const canvas = globalThis.document?.createElement('canvas');
-    if (!canvas) return;
+    if (!canvas) return sign;
     canvas.width = 768;
     canvas.height = 192;
     const context = canvas.getContext('2d');
-    if (!context) return;
+    if (!context) return sign;
 
     context.fillStyle = '#172426';
     context.fillRect(0, 0, 768, 192);
@@ -230,10 +262,12 @@ export class DistrictRoute {
     panel.position.z = 0.063;
     panel.scale.set(width * 0.98, height * 0.95, 1);
     sign.add(panel);
+    return sign;
   }
 
   paintRoute(location) {
     const markings = [];
+    const turns = [];
     for (const points of PAINTED_ROUTES[location.id]) {
       for (let index = 1; index < points.length; index += 1) {
         const [x, z] = points[index - 1];
@@ -242,9 +276,11 @@ export class DistrictRoute {
         const dz = toZ - z;
         const length = Math.hypot(dx, dz);
         const yaw = Math.atan2(dx, dz);
-        for (let distance = 0.5; distance < length - 0.4; distance += 1.35) {
+        const step = location.id === 'extraction' ? 2.75 : 1.45;
+        for (let distance = 0.5; distance < length - 0.4; distance += step) {
           markings.push([x + (dx * distance) / length, z + (dz * distance) / length, yaw]);
         }
+        if (index > 1 && length > 1) turns.push([x, z, yaw]);
       }
     }
     if (location.id === 'extraction') {
@@ -258,28 +294,60 @@ export class DistrictRoute {
     }
 
     const material = this.own(new THREE.MeshStandardMaterial({
-      color: new THREE.Color(location.accent).multiplyScalar(0.58),
-      roughness: 0.96,
+      color: new THREE.Color(location.accent).multiplyScalar(0.48),
+      emissive: location.accent,
+      emissiveIntensity: 0.24,
+      roughness: 0.84,
     }));
-    const marks = new THREE.InstancedMesh(this.geometry.beveledBox(0.14, 0.013, 0.68), material, markings.length);
+    this.addRouteMarks(location.id, 'dashes', markings, material, 0.12, 0.57);
+
+    const arrow = turns.flatMap(([x, z, yaw]) => [-1, 1].map((side) => [
+      x + Math.cos(yaw) * side * 0.115, z - Math.sin(yaw) * side * 0.115,
+      yaw - side * 0.64,
+    ]));
+    this.addRouteMarks(location.id, 'turns', arrow, material, 0.085, 0.43);
+
+    if (location.id === 'kiln') {
+      const alternate = [];
+      for (let index = 1; index < OUTER_KILN_ROUTE.length; index += 1) {
+        const [x, z] = OUTER_KILN_ROUTE[index - 1];
+        const [nextX, nextZ] = OUTER_KILN_ROUTE[index];
+        const length = Math.hypot(nextX - x, nextZ - z);
+        const yaw = Math.atan2(nextX - x, nextZ - z);
+        for (let distance = 1; distance < length - 0.45; distance += 2.25) {
+          alternate.push([x + (nextX - x) * distance / length, z + (nextZ - z) * distance / length, yaw]);
+        }
+      }
+      this.addRouteMarks(location.id, 'outer-freight', alternate, material, 0.16, 0.17);
+    }
+  }
+
+  addRouteMarks(id, name, markings, material, width, length) {
+    if (!markings.length) return;
+    const marks = new THREE.InstancedMesh(this.paintPlane, material, markings.length);
     const transform = new THREE.Object3D();
+    transform.scale.set(width, 1, length);
     markings.forEach(([x, z, yaw], index) => {
-      const raisedDeck = location.id === 'arcade' && z < -6.28;
-      transform.position.set(x, raisedDeck ? 0.079 : 0.047, z);
+      const exchangeDeck = x > -47 && x < -31 && z < -6.28 && z > -21.95;
+      transform.position.set(x, exchangeDeck ? 0.081 : 0.047, z);
       transform.rotation.y = yaw;
       transform.updateMatrix();
       marks.setMatrixAt(index, transform.matrix);
     });
-    marks.name = `route-paint:${location.id}`;
+    marks.name = `route-paint:${id}:${name}`;
     marks.receiveShadow = true;
     this.markings.push(marks);
     this.routeRoot.add(marks);
+    this.addGuide(id, marks);
   }
 
   setStatus(activeId, completedIds = []) {
     const completed = new Set(completedIds);
     for (const [id, { material, accent }] of this.indicators) {
       material.color.copy(accent).multiplyScalar(id === activeId ? 1 : completed.has(id) ? 0.54 : 0.23);
+    }
+    for (const [id, guides] of this.stageGuide) {
+      for (const guide of guides) guide.visible = id === activeId;
     }
   }
 
@@ -293,6 +361,7 @@ export class DistrictRoute {
     this.routeRoot.removeFromParent();
     this.markings.forEach((marks) => marks.dispose());
     this.plane.dispose();
+    this.paintPlane.dispose();
     this.materials.forEach((material) => material.dispose());
     this.textures.forEach((texture) => texture.dispose());
   }

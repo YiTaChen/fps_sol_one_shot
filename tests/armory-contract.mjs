@@ -209,3 +209,49 @@ export async function runBrowserArmoryContract(page) {
   assert.equal(retry.equipped.primary, 'precision');
   await page.evaluate(() => window.__CINDERLINE__.events.emit('game:menu'));
 }
+
+export async function runPracticeContract(page) {
+  const start = page.locator('[data-screen="start"]');
+  const armory = page.locator('[data-screen="armory"]');
+  const state = () => page.evaluate(() => window.__FPS_TEST__.state());
+  await start.locator('[data-action="armory-deploy"]').click();
+  await armory.locator('[data-armory-back]').click();
+  assert.equal((await state()).phase, 'menu');
+  await start.locator('[data-action="range"]').click();
+  assert.equal((await state()).mode, 'range');
+  const practice = await page.evaluate(async () => {
+    const game = window.__CINDERLINE__;
+    const api = window.__FPS_TEST__;
+    const target = game.range.targets[1];
+    const offset = target.position.clone().sub(game.player.eyePosition);
+    game.player.pitch = Math.atan2(offset.y, Math.hypot(offset.x, offset.z));
+    await api.step(1);
+    await api.fire(1);
+    await api.step(18);
+    const hit = { ...api.state().range, enemies: game.enemies.livingCount, credits: api.state().economy.credits };
+    game.player.pitch = 1.2;
+    await api.step(1);
+    await api.fire(1);
+    await api.step(115);
+    return { ...hit, miss: api.state().range };
+  });
+  assert.equal(practice.shots, 1);
+  assert.equal(practice.hits, 1);
+  assert.equal(practice.enemies, 0);
+  assert.equal(practice.credits, 0);
+  assert.equal(practice.miss.shots, 2);
+  assert.equal(practice.miss.streak, 0);
+  assert.equal(practice.miss.best, 1);
+  await page.evaluate(() => window.__CINDERLINE__.events.emit('armory:open'));
+  await armory.locator('[data-buy="precision"]').click();
+  assert.equal((await state()).economy.credits, 0);
+  assert.equal((await state()).economy.equipped.primary, 'precision');
+  await armory.locator('[data-action="armory-close"]').click();
+  await page.evaluate(() => window.__CINDERLINE__.events.emit('game:menu'));
+  assert.equal((await state()).range, null);
+  await start.locator('[data-action="armory-deploy"]').click();
+  assert.equal((await state()).economy.credits, 1400);
+  assert.equal((await state()).economy.equipped.primary, 'vesper');
+  assert(!((await state()).economy.owned.includes('precision')));
+  await armory.locator('[data-armory-back]').click();
+}

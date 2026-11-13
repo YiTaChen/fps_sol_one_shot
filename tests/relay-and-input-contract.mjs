@@ -56,6 +56,9 @@ export async function runRelayAndInputContract(page) {
     stopSignals();
     const victoryMenu = document.querySelector('[data-screen="victory"]');
     const noNextLevel = victoryMenu.querySelector('[data-action="next-level"]').hidden;
+    const debrief = victoryMenu.querySelector('[data-result-summary]').textContent;
+    const relays = victoryMenu.querySelector('[data-result-relays] strong').textContent;
+    const record = api.state().relayRecord;
     await api.restart();
     const restarted = api.state();
     const restartedDistrict = game.worldBuilder.powerStage;
@@ -84,6 +87,9 @@ export async function runRelayAndInputContract(page) {
       restarted: restarted.mission,
       restartedDistrict,
       noNextLevel,
+      debrief,
+      relays,
+      record,
       powerStages,
       signals,
       queued,
@@ -120,6 +126,9 @@ export async function runRelayAndInputContract(page) {
     'Extraction after three relays did not complete the mission');
   assert(outcome.noNextLevel && outcome.restarted.completed === 0,
     'Relay replay or debrief still uses sweep progression');
+  assert(outcome.debrief.includes('Extracted') && outcome.relays === '3 / 3'
+    && outcome.record.clears >= 1 && outcome.record.bestMilliseconds > 0,
+    'Extraction did not update the debrief and saved record');
   assert(!outcome.restarted.decoy && !outcome.sweepMission && outcome.restartedDistrict === 0,
     'District power or decoy state leaked into replay or Endless Sweep');
   assert(outcome.ammoConsumed === 1, 'A short click did not survive a render-only frame');

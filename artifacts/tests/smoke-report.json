@@ -1,6 +1,6 @@
 {
   "status": "passed",
-  "durationMs": 10820.077753,
+  "durationMs": 20480.023689999998,
   "results": [
     {
       "name": "physics step contract",
@@ -148,6 +148,11 @@
       "detail": "10 item images, zoom, purchases, shoulder equipment, scope, melee, and utility release"
     },
     {
+      "name": "practice range and deployment",
+      "status": "passed",
+      "detail": "target hit, free equipment, safe return, and isolated economy"
+    },
+    {
       "name": "console and page errors",
       "status": "passed",
       "detail": "none"
@@ -160,39 +165,39 @@
     "httpErrors": []
   },
   "gameDiagnostics": {
-    "frameCount": 87,
+    "frameCount": 93,
     "medianFrameMs": 50.00000074505806,
     "p95FrameMs": 250,
     "medianFps": 19.99999970197678,
-    "elapsedMs": 9112.900000000373,
+    "elapsedMs": 18244.100000000093,
     "counters": {
-      "listeners": 83,
-      "enemies": 5,
-      "particles": 15
+      "listeners": 85,
+      "enemies": 0,
+      "particles": 0
     },
     "errors": [],
     "renderer": {
       "memory": {
-        "geometries": 483,
-        "textures": 89
+        "geometries": 461,
+        "textures": 96
       },
       "render": {
-        "frame": 4677,
-        "calls": 1,
-        "triangles": 1,
+        "frame": 5598,
+        "calls": 106,
+        "triangles": 15862,
         "points": 0,
         "lines": 0
       }
     },
     "rendererInfo": {
       "memory": {
-        "geometries": 483,
-        "textures": 89
+        "geometries": 461,
+        "textures": 96
       },
       "render": {
-        "frame": 4677,
-        "calls": 1,
-        "triangles": 1,
+        "frame": 5598,
+        "calls": 106,
+        "triangles": 15862,
         "points": 0,
         "lines": 0
       }

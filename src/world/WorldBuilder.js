@@ -216,6 +216,13 @@ const HERO_PROP_PLACEMENTS = Object.freeze([
   ['sack-stack', 12.5, 0.02, -27.7, 0.1, 1],
   ['drum-cart', 36, 0.02, -27.8, -0.2, 1],
   ['compressor', -5.5, 0.02, 28, 0.2, 1],
+  // Offset equipment breaks up the long route without blocking the open lane.
+  ['road-barrier', -25, 0.02, -27.05, 0.07, 0.86],
+  ['shipping-crate', -12, 0.02, -31.7, 0.15, 0.88],
+  ['cable-spool', -1.5, 0.02, -27.05, -0.15, 1],
+  ['shipping-crate', 31, 0.02, -2.55, 0.16, 1],
+  ['road-barrier', 10.5, 0.02, -2.45, -0.17, 0.84],
+  ['shipping-crate', -11.5, 0.02, -2.1, -0.12, 0.87],
 ]);
 
 const INTERIOR_RECIPES = Object.freeze({

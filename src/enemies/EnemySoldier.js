@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BOOT_SOLE_PROFILE, LEG_DIMENSIONS, gaitRate, poseSoldierLeg } from './EnemyLocomotion.js';
 import { createEnemyWardrobeGeometries, UNIFORMS } from './EnemyWardrobe.js';
+import { createSkinnedTrousers, createTrousersGeometry, trouserContactY } from './SoldierTrousers.js';
 import { WorldWeapons } from '../weapons/WorldWeapons.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -410,9 +411,9 @@ function markHitZone(object, enemyId, zone) {
   });
 }
 
-function groundContactY(body, surfaces) {
-  body.updateWorldMatrix(true, true);
-  let lowest = Infinity;
+function groundContactY(body, surfaces, trousers) {
+  body.updateMatrixWorld(true);
+  let lowest = trouserContactY(trousers);
   for (const surface of surfaces) {
     const positions = surface.geometry.getAttribute('position').array;
     const matrix = surface.matrixWorld.elements;
@@ -433,11 +434,6 @@ function createStrapCurve(x, y, z, side) {
   ]);
 }
 
-function stitchedSeam(points) {
-  const curve = new THREE.CatmullRomCurve3(points.map((point) => new THREE.Vector3(...point)));
-  return new THREE.TubeGeometry(curve, 14, 0.0023, 5, false);
-}
-
 export function createEnemySharedAssets() {
   const fabricMap = makeNoiseTexture(0x0f4aa83b);
   const polymerMap = makeNoiseTexture(0x79d14f2d, 64);
@@ -451,6 +447,9 @@ export function createEnemySharedAssets() {
   const contactMap = makeContactShadowMap();
   const makePalette = (colors) => ({
     cloth: material(colors.cloth, 0.88, 0.01, fabricMap, { roughnessMap: fabricRoughness }),
+    trousers: material(colors.cloth, 0.91, 0, fabricMap, {
+      roughnessMap: fabricRoughness, vertexColors: true,
+    }),
     clothDark: material(colors.clothDark, 0.91, 0, fabricMap, { roughnessMap: fabricRoughness }),
     clothStitch: material(new THREE.Color(colors.cloth).lerp(new THREE.Color(colors.clothDark), 0.38),
       0.91, 0, fabricMap, { roughnessMap: fabricRoughness }),
@@ -495,14 +494,7 @@ export function createEnemySharedAssets() {
       [0.225, 0.265, 0.158, 0, -0.006],
       [0.255, 0.205, 0.125],
     ], { radialSegments: 16, contour: 0.045 }),
-    pelvis: loftedBodyGeometry([
-      [-0.134, 0.041, 0.064, 0, -0.008],
-      [-0.101, 0.100, 0.099, 0, -0.001],
-      [-0.055, 0.160, 0.113, 0, -0.001],
-      [0.024, 0.190, 0.124, 0, 0.007],
-      [0.09, 0.181, 0.110, 0, 0.008],
-      [0.122, 0.170, 0.103, 0, 0.005],
-    ], { radialSegments: 18, contour: 0.02 }),
+    trousers: createTrousersGeometry(),
     pouch: loftedBodyGeometry([
       [-0.085, 0.052, 0.038],
       [-0.058, 0.073, 0.052],
@@ -522,39 +514,6 @@ export function createEnemySharedAssets() {
       fold: 0.052,
       seam: 0.052,
     }),
-    legUpper: loftedBodyGeometry([
-      [-LEG_DIMENSIONS.thigh - 0.038, 0.064, 0.049, 0, 0.009],
-      [-LEG_DIMENSIONS.thigh - 0.009, 0.071, 0.064, 0, 0.005],
-      [-0.423, 0.073, 0.062, 0, 0.003],
-      [-0.408, 0.078, 0.068, 0, -0.001],
-      [-0.395, 0.076, 0.067, 0, -0.003],
-      [-0.335, 0.083, 0.077, 0, -0.007],
-      [-0.260, 0.091, 0.088, 0, -0.009],
-      [-0.147, 0.104, 0.101, 0, -0.002],
-      [-0.050, 0.106, 0.110, 0, 0.013],
-      [0.012, 0.098, 0.103, 0, 0.012],
-      [0.054, 0.074, 0.084, 0, 0.012],
-    ], { radialSegments: 16, contour: 0.038 }),
-    legLower: loftedBodyGeometry([
-      [-LEG_DIMENSIONS.shin + 0.023, 0.047, 0.049, 0, 0.008],
-      [-0.382, 0.054, 0.056, 0, 0.009],
-      [-0.363, 0.051, 0.052, 0, 0.007],
-      [-0.349, 0.052, 0.054, 0, 0.007],
-      [-0.285, 0.059, 0.060, 0, 0.013],
-      [-0.216, 0.070, 0.074, 0, 0.023],
-      [-0.157, 0.080, 0.077, 0, 0.025],
-      [-0.088, 0.079, 0.067, 0, 0.014],
-      [-0.024, 0.068, 0.065, 0, 0.007],
-      [0.032, 0.066, 0.052, 0, 0.011],
-    ], { radialSegments: 16, contour: 0.04 }),
-    thighSeam: stitchedSeam([
-      [0.107, -0.050, 0.031], [0.105, -0.150, 0.021], [0.093, -0.260, 0.009],
-      [0.085, -0.335, 0.010], [0.077, -0.395, 0.013],
-    ]),
-    shinSeam: stitchedSeam([
-      [0.077, -0.088, 0.031], [0.082, -0.157, 0.042], [0.072, -0.216, 0.040],
-      [0.060, -0.285, 0.028], [0.052, -0.357, 0.018],
-    ]),
     hand: loftedBodyGeometry([
       [-0.055, 0.037, 0.025, 0, -0.015],
       [-0.030, 0.052, 0.036, 0, -0.009],
@@ -698,11 +657,12 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
   bodyRoot.name = `enemy-soldier-${id}-body`;
   root.add(bodyRoot);
 
-  const pelvis = mesh(geometry.pelvis, palette.cloth, 'pelvis');
+  const pelvis = new THREE.Bone();
+  pelvis.name = 'pelvis';
   pelvis.position.y = LEG_DIMENSIONS.hipHeight + 0.01;
   bodyRoot.add(pelvis);
 
-  const torsoPivot = new THREE.Group();
+  const torsoPivot = new THREE.Bone();
   torsoPivot.position.y = LEG_DIMENSIONS.hipHeight + TORSO_RISE;
   bodyRoot.add(torsoPivot);
   const torso = mesh(geometry.torso, palette.cloth, 'combat-shirt');
@@ -766,22 +726,13 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
   const characterOwnedGeometries = [];
 
   function makeLeg(side) {
-    const upperPivot = new THREE.Group();
+    const upperPivot = new THREE.Bone();
     upperPivot.name = side < 0 ? 'left-leg' : 'right-leg';
     upperPivot.position.set(side * LEG_DIMENSIONS.hipSpacing, LEG_DIMENSIONS.hipHeight, 0);
     bodyRoot.add(upperPivot);
-    const upper = mesh(geometry.legUpper, palette.cloth, 'tailored-trouser-thigh');
-    const thighSeam = mesh(geometry.thighSeam, palette.clothStitch, 'stitched-trouser-seam', false);
-    thighSeam.scale.x = side;
-    upperPivot.add(upper, thighSeam);
-
-    const knee = new THREE.Group();
+    const knee = new THREE.Bone();
     knee.position.y = -LEG_DIMENSIONS.thigh;
     upperPivot.add(knee);
-    const lower = mesh(geometry.legLower, palette.cloth, 'reinforced-trouser-shin');
-    const shinSeam = mesh(geometry.shinSeam, palette.clothStitch, 'stitched-trouser-seam', false);
-    shinSeam.scale.x = side;
-    knee.add(lower, shinSeam);
     const kneepad = mesh(assets.wardrobe.kneePlate, palette.shell, 'formed-knee-protector');
     kneepad.position.set(0, 0.009, -0.060);
     kneepad.scale.set(0.81, 0.84, 0.79);
@@ -893,6 +844,10 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
 
   const leftLeg = makeLeg(-1);
   const rightLeg = makeLeg(1);
+  const trousers = createSkinnedTrousers(
+    bodyRoot, geometry.trousers, palette.trousers, pelvis, leftLeg, rightLeg, torsoPivot,
+  );
+  markHitZone(trousers, id, 'leg');
   const leftArm = makeArm(-1);
   const rightArm = makeArm(1);
 
@@ -932,8 +887,8 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
   const distanceDetails = [];
   const bodyShadows = [];
   const accessoryShadows = [];
-  const detailNames = /binding|marking|strap|buckle|cargo-thigh|cuff|knuckle|treaded|filter-housings|stitched-trouser-seam/;
-  const shadowShapes = /combat-shirt|pelvis|helmet-shell|trouser|reinforced-forearm|tailored-upper|tactical-boot/;
+  const detailNames = /binding|marking|strap|buckle|cargo-thigh|cuff|knuckle|treaded|filter-housings/;
+  const shadowShapes = /combat-shirt|helmet-shell|trouser|reinforced-forearm|tailored-upper|tactical-boot/;
   bodyRoot.traverse((part) => {
     if (!part.isMesh) return;
     if (detailNames.test(part.name)) distanceDetails.push(part);
@@ -942,7 +897,9 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
       collection.push(part);
     }
   });
-  const fallContact = [...bodyShadows, vest, pack, leftLeg.bootSole, rightLeg.bootSole];
+  const fallContact = [
+    ...bodyShadows.filter((part) => part !== trousers), vest, pack, leftLeg.bootSole, rightLeg.bootSole,
+  ];
   let renderDetail = '';
 
   const rig = {
@@ -991,6 +948,9 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
     landingWeight: 0,
     slideWeight: 0,
     crouchWeight: 0,
+    poseYaw: null,
+    turnOffset: 0,
+    turnWeight: 0,
     lastGroundY: 0,
     setGround(y) {
       root.position.y = y;
@@ -1032,7 +992,19 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
       this.airWeight = stance.airborne ? THREE.MathUtils.damp(this.airWeight, 1, 18, dt) : 0;
       this.slideWeight = THREE.MathUtils.damp(this.slideWeight, stance.sliding || stance.slide ? 1 : 0, 18, dt);
       this.crouchWeight = THREE.MathUtils.damp(this.crouchWeight, stance.crouch ?? 0, 18, dt);
-      const cadence = gaitRate(this.gaitSpeed);
+      if (dt > 0) {
+        const yaw = root.rotation.y;
+        const deltaYaw = this.poseYaw === null ? 0 : THREE.MathUtils.euclideanModulo(yaw - this.poseYaw + Math.PI, Math.PI * 2) - Math.PI;
+        const turnOnSpot = (1 - THREE.MathUtils.smoothstep(this.gaitWeight, 0.03, 0.4))
+          * (1 - this.slideWeight) * (1 - this.airWeight);
+        const yawRate = Math.abs(deltaYaw) / dt;
+        this.turnOffset = THREE.MathUtils.damp(
+          THREE.MathUtils.clamp(this.turnOffset - deltaYaw * turnOnSpot, -0.46, 0.46), 0, 9, dt,
+        );
+        this.turnWeight = THREE.MathUtils.damp(this.turnWeight, Math.min(yawRate * 0.34, 1) * turnOnSpot, 9, dt);
+        this.poseYaw = yaw;
+      }
+      const cadence = gaitRate(this.gaitSpeed) + this.turnWeight * 1.45;
       this.stride += dt * cadence * Math.PI * 2;
       this.recoil = THREE.MathUtils.damp(this.recoil, firing ? 1 : 0, 23, dt);
       this.hit = THREE.MathUtils.damp(this.hit, hit, 13, dt);
@@ -1072,6 +1044,7 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
         rightLeg.ankle.rotation.set(0.37 + kneel * 0.23, -0.08, 0);
 
         pelvis.position.y = hipHeight + 0.01 - kneel * 0.13;
+        pelvis.position.z = 0;
         pelvis.rotation.set(
           kneel * 0.16,
           sideSign * kneel * 0.09,
@@ -1111,7 +1084,7 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
           -0.045 - sideSign * fall * 0.12,
           -sideSign * fall * 0.38,
         );
-        const offset = this.lastGroundY - groundContactY(bodyRoot, fallContact);
+        const offset = this.lastGroundY - groundContactY(bodyRoot, fallContact, trousers);
         this.deathOffsetY = offset / bodyRoot.scale.y;
         bodyRoot.position.y = offset + 0.002;
         contactShadow.position.y = -root.position.y + this.lastGroundY - 0.003;
@@ -1143,12 +1116,13 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
       const directionLength = Math.hypot(strafe, forward) || 1;
       // Keep the feet in separate lanes when the body strafes across its
       // aim direction. The upper torso and weapon continue to face the aim.
-      const heading = -1.1 * strafe / directionLength
+      const heading = this.turnOffset - 1.1 * strafe / directionLength
         * THREE.MathUtils.smoothstep(groundedMotion, 0, 0.46);
+      const hipBack = crouchWeight * 0.055 + slideWeight * 0.03;
       const locomotion = {
         crouch: crouchWeight, sliding: slideWeight, airborne: airWeight,
         strafe: strafe / directionLength, forward: forward / directionLength,
-        speed, cadence, runWeight, heading,
+        speed, cadence, runWeight, heading, turning: this.turnWeight, hipBack,
       };
       const hipHeight = LEG_DIMENSIONS.hipHeight - Math.sqrt(groundedMotion) * 0.059
         - aimRaise * 0.019 - crouchWeight * 0.31 - slideWeight * 0.12 - runWeight * 0.033
@@ -1160,12 +1134,13 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
 
       pelvis.position.x = hipSway;
       pelvis.position.y = hipHeight + 0.01 + weightShift;
+      pelvis.position.z = hipBack;
       pelvis.rotation.x = -aimRaise * 0.025 - motion * 0.054;
       pelvis.rotation.y = heading + aimRaise * 0.065 + gait * motion * 0.065;
       pelvis.rotation.z = -aimRaise * 0.018 + gait * motion * 0.033;
       torsoPivot.position.x = aimRaise * 0.014 + gait * motion * 0.018 + impact * hitDirection * 0.013;
       torsoPivot.position.y = hipHeight + TORSO_RISE + breathing * 0.006 + weightShift;
-      torsoPivot.position.z = aimRaise * 0.008 - motion * 0.019 + impact * 0.022;
+      torsoPivot.position.z = aimRaise * 0.008 - motion * 0.019 + impact * 0.022 + hipBack * 0.44;
       torsoPivot.rotation.x =
         -aimRaise * 0.095 - motion * 0.061 - crouchWeight * 0.23
         + slideWeight * 0.32 + impact * 0.19 + breathing * 0.008;
@@ -1263,6 +1238,7 @@ export function createEnemySoldier(id, visualVariant, assets, weaponId = 'vesper
       return this.rifle.getWorldDirection(target).multiplyScalar(-1).normalize();
     },
     dispose() {
+      trousers.skeleton.dispose();
       ownedGeometries.forEach((value) => value.dispose());
       ownedMaterials.forEach((value) => value.dispose());
       root.removeFromParent();
