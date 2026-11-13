@@ -1,5 +1,20 @@
 import * as THREE from 'three';
 
+const WEAPON_TIMBRES = Object.freeze({
+  vesper: [3600, 168, 57, 0.14, 0.19, 1],
+  smg: [4450, 220, 86, 0.073, 0.082, 0.72],
+  precision: [2700, 110, 39, 0.22, 0.29, 1.08],
+  sidearm: [5100, 245, 108, 0.091, 0.096, 0.73],
+  'heavy-sidearm': [3800, 153, 56, 0.165, 0.19, 0.98],
+  enemy: [2700, 132, 48, 0.115, 0.19, 0.8],
+});
+
+const UTILITY_TIMBRES = Object.freeze({
+  pulse: [105, 48, 0.27, 'triangle', 0.37],
+  haze: [880, 340, 0.46, 'sine', 0.15],
+  stasis: [410, 770, 0.31, 'triangle', 0.22],
+});
+
 const tmpPosition = new THREE.Vector3();
 const tmpForward = new THREE.Vector3();
 const tmpUp = new THREE.Vector3();
@@ -157,6 +172,9 @@ export class AudioSystem {
         const isEnemy = data?.kind === 'enemy' || String(data?.source ?? '').startsWith('enemy:');
         this.play(isEnemy ? 'enemy-fire' : 'rifle-fire', data);
       }),
+      subscribe(this.events, 'weapon:melee', (data) => this.play('melee-swing', data)),
+      subscribe(this.events, 'weapon:cycle', (data) => this.play('reload-charge', data)),
+      subscribe(this.events, 'throwable:deployed', (data) => this.play(`orb-${data.id}`, data)),
       subscribe(this.events, 'weapon:dry', (data) => this.play('weapon-dry', data)),
       subscribe(this.events, 'weapon:reload-start', (data) => this.play('reload-grab', data)),
       subscribe(this.events, 'weapon:reload-phase', (data) => {
@@ -321,6 +339,8 @@ export class AudioSystem {
 
     if (normalized === 'rifle-fire') return this._playRifle(options, false);
     if (normalized === 'enemy-fire') return this._playRifle(options, true);
+    if (normalized === 'melee-swing') return this._playMelee(options);
+    if (normalized.startsWith('orb-')) return this._playOrb(normalized.slice(4), options);
     if (normalized === 'weapon-dry') return this._playDry(options);
     if (
       normalized.startsWith('reload-') ||
@@ -338,6 +358,7 @@ export class AudioSystem {
     if (normalized.includes('footstep')) return this._playFootstep(normalized, options);
     if (normalized === 'player-jump') return this._playJump(options);
     if (normalized === 'player-land') return this._playLand(options);
+    if (normalized === 'relay-pulse') return this._playRelayPulse(options);
     if (normalized === 'slide' || normalized === 'mantle') {
       return this._playMovement(normalized, options);
     }
@@ -479,12 +500,14 @@ export class AudioSystem {
   }
 
   _playRifle(options, enemy) {
-    const volume = clamp(options.volume ?? 1, 0, 1.5) * (enemy ? 0.72 : 0.9);
+    const key = options.weaponId ?? (enemy ? 'enemy' : 'vesper');
+    const [crack, pitch, endPitch, bodyTime, tailTime, gain] = WEAPON_TIMBRES[key] ?? WEAPON_TIMBRES.vesper;
+    const volume = clamp(options.volume ?? 1, 0, 1.5) * gain * 0.9;
     this._noise({
       duration: 0.032,
       attack: 0.0005,
       volume: volume,
-      frequency: enemy ? 2700 : 3600,
+      frequency: crack,
       endFrequency: 920,
       filterType: 'bandpass',
       q: 0.62,
@@ -492,16 +515,16 @@ export class AudioSystem {
       options,
     });
     this._tone({
-      frequency: enemy ? 132 : 168,
-      endFrequency: enemy ? 48 : 57,
+      frequency: pitch,
+      endFrequency: endPitch,
       type: 'sawtooth',
-      duration: enemy ? 0.115 : 0.14,
+      duration: bodyTime,
       volume: volume * 0.58,
       bus: 'weapon',
       options,
     });
     this._noise({
-      duration: 0.19,
+      duration: tailTime,
       delay: 0.018,
       attack: 0.003,
       volume: volume * 0.36,
@@ -523,6 +546,36 @@ export class AudioSystem {
       options,
     });
     return true;
+  }
+
+  _playMelee(options) {
+    return this._noise({
+      frequency: 2750,
+      endFrequency: 560,
+      duration: 0.17,
+      attack: 0.027,
+      volume: 0.23,
+      filterType: 'bandpass',
+      bus: 'foley',
+      options,
+    });
+  }
+
+  _playOrb(id, options) {
+    const profile = UTILITY_TIMBRES[id];
+    if (!profile) return null;
+    const [frequency, endFrequency, duration, type, volume] = profile;
+    this._noise({
+      frequency: id === 'haze' ? 1750 : 780,
+      endFrequency: 220,
+      duration,
+      attack: id === 'haze' ? 0.04 : 0.004,
+      volume: volume * 0.52,
+      bus: 'foley',
+      reverb: 0.28,
+      options,
+    });
+    return this._tone({ frequency, endFrequency, duration, type, volume, bus: 'foley', options });
   }
 
   _playDry(options) {
@@ -785,6 +838,23 @@ export class AudioSystem {
     return true;
   }
 
+  _playRelayPulse(options) {
+    const volume = clamp(options.volume ?? 0.8, 0, 1.5);
+    for (const [frequency, delay] of [[218, 0], [326, 0.15], [490, 0.30]]) {
+      this._tone({
+        frequency,
+        endFrequency: frequency * 0.73,
+        type: 'triangle',
+        duration: 0.18,
+        volume: volume * 0.36,
+        delay,
+        reverb: 0.2,
+        options,
+      });
+    }
+    return true;
+  }
+
   _playResult(name) {
     const victory = name === 'victory';
     const notes = victory ? [220, 277.18, 329.63, 440] : [196, 174.61, 146.83];
@@ -883,8 +953,9 @@ export class AudioSystem {
   }
 
   setMasterVolume(value) {
+    this.options.volume = clamp(value, 0, 1);
     if (!this.master || !this.context) return;
-    this.master.gain.setTargetAtTime(clamp(value, 0, 1), this.context.currentTime, 0.035);
+    this.master.gain.setTargetAtTime(this.options.volume, this.context.currentTime, 0.035);
   }
 
   reset() {

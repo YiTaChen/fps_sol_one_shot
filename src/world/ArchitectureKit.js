@@ -147,14 +147,14 @@ function facadeOpenings(spec, floor, height) {
       open: Boolean(spec.enterable),
     });
 
-    if (spec.family === 'corrugatedWorkshop' || spec.family === 'shutteredDepot') {
+    if (spec.family === 'corrugatedWorkshop' || spec.family === 'shutteredDepot' || spec.freightEntry) {
       openings.push({
         type: 'shutter',
         x: Math.min(halfWidth - 2.6, spec.width * 0.12),
         width: Math.min(4.6, spec.width * 0.42),
         bottom: 0.03,
         height: 2.62,
-        open: Boolean(spec.enterable && spec.family === 'corrugatedWorkshop'),
+        open: Boolean(spec.enterable && (spec.family === 'corrugatedWorkshop' || spec.freightEntry)),
       });
     } else {
       openings.push({
@@ -683,13 +683,26 @@ export class ArchitectureKit {
     const front = spec.depth * 0.5;
     const top = spec.height;
 
-    this.addInstance(
-      spec,
-      family.base,
-      _scale.set(spec.width + 0.18, 0.42, 0.42),
-      _local.set(0, 0.23, front + 0.02),
-      { module: 'foundation' },
-    );
+    const halfFoundation = spec.width * 0.5 + 0.09;
+    const foundationRuns = [];
+    let edge = -halfFoundation;
+    if (spec.rearPassage) {
+      for (const opening of facadeOpenings(spec, 0, FLOOR_HEIGHT)) {
+        if (!opening.open) continue;
+        foundationRuns.push([edge, opening.x - opening.width * 0.5 - 0.055]);
+        edge = opening.x + opening.width * 0.5 + 0.055;
+      }
+    }
+    foundationRuns.push([edge, halfFoundation]);
+    for (const [from, to] of foundationRuns) {
+      this.addInstance(
+        spec,
+        family.base,
+        _scale.set(to - from, 0.42, 0.42),
+        _local.set((from + to) * 0.5, 0.23, front + 0.02),
+        { module: 'foundation' },
+      );
+    }
     this.addInstance(
       spec,
       family.trim,
@@ -711,6 +724,8 @@ export class ArchitectureKit {
     for (const side of [-1, 1]) {
       const sideX = side * (spec.width * 0.5 + 0.055);
       for (const z of [-spec.depth * 0.31, 0, spec.depth * 0.31]) {
+        const shutter = spec.poweredShutter;
+        if (shutter?.side === side && Math.abs(z - shutter.z) < shutter.width * 0.5 + 0.18) continue;
         this.addInstance(
           spec,
           family.trim,
@@ -733,10 +748,11 @@ export class ArchitectureKit {
     switch (spec.family) {
       case 'marketArcade': {
         const awningY = 2.72;
+        const isExchange = spec.id === 'saffron-arcade';
         this.addBox(
           group,
           spec,
-          'fabric',
+          isExchange ? 'paintedMetal' : 'fabric',
           new THREE.Vector3(spec.width * 0.62, 0.09, 2.1),
           new THREE.Vector3(spec.width * 0.08, awningY, front + 0.88),
           {
@@ -756,7 +772,7 @@ export class ArchitectureKit {
         }
         this.addInstance(
           spec,
-          'wood',
+          isExchange ? 'rustedMetal' : 'wood',
           _scale.set(spec.width * 0.52, 0.74, 0.09),
           _local.set(spec.width * 0.08, 3.06, front + 0.3),
           { module: 'fascia-sign' },
@@ -804,7 +820,25 @@ export class ArchitectureKit {
             { module: 'foundation' },
           );
         }
-        for (let tab = -5; tab <= 5; tab += 1) {
+        if (isExchange) {
+          this.addInstance(
+            spec,
+            'paintedMetal',
+            _scale.set(spec.width * 0.62, 0.18, 0.12),
+            _local.set(spec.width * 0.08, awningY + 0.095, front + 1.89),
+            { module: 'awning' },
+          );
+          for (let rib = -7; rib <= 7; rib += 1) {
+            this.addInstance(
+              spec,
+              'bareMetal',
+              _scale.set(0.028, 0.19, 0.031),
+              _local.set(spec.width * 0.08 + rib * 0.63, awningY + 0.095, front + 1.96),
+              { module: 'awning' },
+            );
+          }
+        }
+        for (let tab = -5; !isExchange && tab <= 5; tab += 1) {
           this.addProfile(
             spec,
             tab % 2 === 0 ? 'fabric' : 'plasterOchre',
@@ -1167,6 +1201,48 @@ export class ArchitectureKit {
     }
   }
 
+  buildRearWall(group, spec, family) {
+    const rear = -spec.depth * 0.5;
+    const passage = spec.rearPassage;
+    const addWall = (width, height, x, y) => {
+      this.addBox(
+        group,
+        spec,
+        family.wall,
+        new THREE.Vector3(width, height, WALL_THICKNESS),
+        new THREE.Vector3(x, y, rear),
+        { radius: 0.018, collider: true, module: 'wall-segment' },
+      );
+    };
+    if (!passage) {
+      addWall(spec.width, spec.height, 0, spec.height * 0.5);
+      return;
+    }
+
+    const left = passage.x - passage.width * 0.5;
+    const right = passage.x + passage.width * 0.5;
+    const halfWidth = spec.width * 0.5;
+    const openingHeight = 2.62;
+    addWall(left + halfWidth, spec.height, (left - halfWidth) * 0.5, spec.height * 0.5);
+    addWall(halfWidth - right, spec.height, (right + halfWidth) * 0.5, spec.height * 0.5);
+    addWall(passage.width, spec.height - openingHeight, passage.x, (spec.height + openingHeight) * 0.5);
+
+    for (const edge of [left, right]) {
+      this.addInstance(
+        spec, family.trim,
+        _scale.set(0.14, openingHeight, 0.48),
+        _local.set(edge, openingHeight * 0.5, rear),
+        { module: 'door-frame' },
+      );
+    }
+    this.addInstance(
+      spec, family.trim,
+      _scale.set(passage.width + 0.14, 0.16, 0.48),
+      _local.set(passage.x, openingHeight, rear),
+      { module: 'door-frame' },
+    );
+  }
+
   buildBuilding(inputSpec) {
     const family = FACADE_FAMILIES[inputSpec.family];
     if (!family) {
@@ -1183,6 +1259,10 @@ export class ArchitectureKit {
       family: inputSpec.family,
       enterable: Boolean(inputSpec.enterable),
       doorX: inputSpec.doorX,
+      rearPassage: inputSpec.rearPassage,
+      freightEntry: Boolean(inputSpec.freightEntry),
+      atrium: Boolean(inputSpec.atrium),
+      poweredShutter: inputSpec.poweredShutter,
       variant: inputSpec.variant ?? 0,
     };
     const group = new THREE.Group();
@@ -1199,7 +1279,7 @@ export class ArchitectureKit {
       spec,
       family.base,
       new THREE.Vector3(spec.width - WALL_THICKNESS * 1.4, 0.12, spec.depth - WALL_THICKNESS * 1.4),
-      new THREE.Vector3(0, -0.06, 0),
+      new THREE.Vector3(0, spec.enterable ? -0.022 : -0.06, 0),
       { radius: 0.022, collider: false, module: 'floor-slab' },
     );
     this.addBox(
@@ -1215,36 +1295,41 @@ export class ArchitectureKit {
         castShadow: true,
       },
     );
-    this.addBox(
-      group,
-      spec,
-      family.wall,
-      new THREE.Vector3(spec.width, spec.height, WALL_THICKNESS),
-      new THREE.Vector3(0, spec.height * 0.5, -spec.depth * 0.5),
-      { radius: 0.018, collider: true, module: 'wall-segment' },
-    );
+    this.buildRearWall(group, spec, family);
     for (const x of [-spec.width * 0.5, spec.width * 0.5]) {
-      this.addBox(
-        group,
-        spec,
-        family.wall,
-        new THREE.Vector3(WALL_THICKNESS, spec.height, spec.depth),
-        new THREE.Vector3(x, spec.height * 0.5, 0),
+      const addSide = (start, end, base = 0) => this.addBox(
+        group, spec, family.wall,
+        new THREE.Vector3(WALL_THICKNESS, spec.height - base, end - start),
+        new THREE.Vector3(x, (spec.height + base) * 0.5, (start + end) * 0.5),
         { radius: 0.018, collider: true, module: 'wall-segment' },
       );
+      const shutter = spec.poweredShutter;
+      const halfDepth = spec.depth * 0.5;
+      if (shutter && Math.sign(x) === shutter.side) {
+        const start = shutter.z - shutter.width * 0.5;
+        const end = shutter.z + shutter.width * 0.5;
+        addSide(-halfDepth, start);
+        addSide(end, halfDepth);
+        addSide(start, end, shutter.height);
+      } else {
+        addSide(-halfDepth, halfDepth);
+      }
     }
 
     for (let floor = 0; floor < spec.stories; floor += 1) {
       this.buildFacadeFloor(group, spec, family, floor);
       if (floor > 0 && spec.enterable) {
-        this.addBox(
-          group,
-          spec,
-          family.base,
-          new THREE.Vector3(spec.width - 0.55, 0.16, spec.depth - 0.55),
-          new THREE.Vector3(0, floor * FLOOR_HEIGHT, 0),
-          { radius: 0.02, collider: false, module: 'floor-slab' },
-        );
+        const slabRuns = spec.atrium
+          ? [[-6.45, 2.55], [6.45, 2.55]]
+          : [[0, spec.width - 0.55]];
+        for (const [x, width] of slabRuns) {
+          this.addBox(
+            group, spec, 'concreteAggregate',
+            new THREE.Vector3(width, 0.16, spec.depth - 0.55),
+            new THREE.Vector3(x, floor * FLOOR_HEIGHT, 0),
+            { radius: 0.02, collider: false, module: 'floor-slab' },
+          );
+        }
       }
     }
 

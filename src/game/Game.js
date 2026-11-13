@@ -16,10 +16,19 @@ import {
 import { MaterialLibrary } from "../materials/MaterialLibrary.js";
 import { PhysicsWorld } from "../physics/PhysicsWorld.js";
 import { PlayerController } from "../player/PlayerController.js";
+import { ShoulderCamera } from "../player/ShoulderCamera.js";
+import { createEnemySoldier } from "../enemies/EnemySoldier.js";
 import { RendererSystem } from "../rendering/RendererSystem.js";
 import { UI } from "../ui/UI.js";
+import { WEAPON_DEFINITIONS } from "../weapons/Arsenal.js";
 import { Rifle } from "../weapons/Rifle.js";
+import { THROWABLES, Throwables } from "../weapons/Throwables.js";
 import { WorldBuilder } from "../world/WorldBuilder.js";
+import { normalizeControls, readControls, saveControls } from "./ControlSettings.js";
+import { RELAY_PATROLS, RelayMission } from "./RelayMission.js";
+import { CREDIT_REWARDS, OperationEconomy } from "./OperationEconomy.js";
+import { PracticeRange, RANGE_SPAWN } from "./PracticeRange.js";
+import { readRelayRecord, recordExtraction } from "./RelayRecord.js";
 import {
   deriveLevelSeed,
   readHighestClearedLevel,
@@ -29,7 +38,48 @@ import {
 const FIXED_STEP = 1 / 60;
 const BASE_ENEMY_COUNT = 7;
 const ACTIVE_ENEMY_LIMIT = 12;
+const DEFAULT_KIT = Object.freeze({ primary: "vesper", secondary: "sidearm", melee: "melee" });
+const WEAPON_KEYS = Object.freeze({ Digit1: "primary", Digit2: "secondary", Digit3: "melee" });
+const THROWABLE_KEYS = Object.freeze({ Digit4: "pulse", Digit5: "haze", Digit6: "stasis" });
+const WEAPON_CATEGORIES = {
+  vesper: "Assault rifle",
+  smg: "Submachine gun",
+  precision: "Scoped sniper",
+  sidearm: "Light sidearm",
+  "heavy-sidearm": "Heavy sidearm",
+  melee: "Melee",
+};
+const ARMORY_CATALOG = [
+  ...Object.values(WEAPON_DEFINITIONS).map((item) => ({
+    id: item.id, slot: item.slot, label: item.name, price: item.cost, detail: item.description,
+    category: WEAPON_CATEGORIES[item.id],
+    facts: [
+      ["Action", item.melee ? "Swing" : item.boltCycle ? "Bolt action"
+        : item.automatic ? "Automatic" : "Semi-auto"],
+      ["Magazine", item.melee ? "None" : `${item.magazineCapacity} rounds`],
+      ["Movement", `${Math.round((item.mobility ?? 1) * 100)}%`],
+    ],
+  })),
+  ...Object.values(THROWABLES).map((item) => ({
+    id: item.id, kind: "throwable", label: item.label, price: item.price,
+    category: "Throwable", detail: item.detail ?? item.description, max: item.max ?? 2,
+  })),
+  {
+    id: "reserve-case", kind: "service", label: "Reserve Case", price: 180,
+    category: "Ammunition service",
+    detail: "Refills reserve ammunition for every owned firearm. Magazines still need a reload.",
+  },
+];
+const THROWABLE_IDS = Object.values(THROWABLE_KEYS);
+const ARMORY_RADIUS = 9;
+const FIELD_LOCKER_RADIUS = 3.2;
+const FIELD_LOCKER_THREAT_RADIUS = 10;
+const THROW_WINDUP = 0.18;
+const MENU_CAMERA_POSITION = new THREE.Vector3(-45.6, 2.35, 5.4);
+const MENU_CAMERA_TARGET = new THREE.Vector3(-42.5, 3.5, -6);
 const _damageDirection = new THREE.Vector3(0, 0, 1);
+const _throwPosition = new THREE.Vector3();
+const _avatarAim = new THREE.Vector3();
 const _capturePosition = new THREE.Vector3();
 const _captureTarget = new THREE.Vector3();
 const _captureDirection = new THREE.Vector3();
@@ -127,12 +177,33 @@ export class Game {
     this.clock = new FixedClock(FIXED_STEP);
     this.diagnostics = new Diagnostics();
     this.physics = new PhysicsWorld();
+    const controls = readControls();
     this.rendering = new RendererSystem(
       container,
-      options.quality || "high",
+      options.quality ?? controls.quality,
+    );
+    if (options.exchangeAsset) this.rendering.installExchange(options.exchangeAsset);
+    this.economy = new OperationEconomy(
+      ARMORY_CATALOG,
+      DEFAULT_KIT,
+      (id) => id === "reserve-case" && this.economy.state.owned.some((weaponId) => {
+        const weapon = this.weaponInstances.get(weaponId);
+        return weapon && weapon.reserve < weapon.options.reserveAmmo;
+      }),
     );
     this.state = {
+      economy: this.economy.state,
+      armoryAvailable: false,
+      preDeployment: false,
+      range: null,
+      relayRecord: readRelayRecord(),
+      shoulderView: false,
+      equippedSlot: "primary",
+      throwable: "pulse",
       phase: "menu",
+      mode: "sweep",
+      mission: null,
+      controls,
       level: 1,
       baseEnemyCount: BASE_ENEMY_COUNT,
       highestClearedLevel: readHighestClearedLevel(),
@@ -155,7 +226,7 @@ export class Game {
       input: null,
       quality: this.rendering.quality,
       physics: this.physics,
-      assets: {},
+      assets: { exchangeAsset: options.exchangeAsset, armory: this.economy },
       state: this.state,
       diagnostics: this.diagnostics,
     };
@@ -174,6 +245,7 @@ export class Game {
 
     this.materials = MaterialLibrary.fromContext(this.context, {
       textureSize: this.rendering.quality.name === "low" ? 128 : 256,
+      authoredSurfaces: options.authoredSurfaces,
     });
     this.context.assets.materials = this.materials;
     this.context.assets.materialLibrary = this.materials;
@@ -183,7 +255,12 @@ export class Game {
       physics: this.physics,
     });
     this.world = this.worldBuilder.build(this.context);
+    this.range = new PracticeRange(this.context);
     this.context.assets.world = this.world;
+    this.relayMission = this.world.route?.length && this.world.extraction
+      ? new RelayMission(this.world.route, this.world.extraction)
+      : null;
+    this.world.setRouteStatus?.(null, []);
     if (this.world?.root && !this.world.root.parent) {
       this.rendering.worldRoot.add(this.world.root);
     }
@@ -195,6 +272,7 @@ export class Game {
     this.context.input = this.input;
 
     this.player = new PlayerController(this.context);
+    this.player.applyControls(this.state.controls);
     const spawn = this.world?.spawn?.position
       ?? this.world?.spawn
       ?? this.world?.playerSpawn?.position
@@ -208,7 +286,10 @@ export class Game {
     this.state.player = this.player.snapshot;
     this.state.playerSnapshot = this.player.snapshot;
 
-    this.rifle = new Rifle(this.context);
+    this.rifle = new Rifle(this.context, WEAPON_DEFINITIONS.vesper);
+    this.weaponInstances = new Map([["vesper", this.rifle]]);
+    this.activeWeaponId = "vesper";
+    this.inOpeningArea = true;
     this.state.weapon = this.rifle.snapshot;
     this.state.weaponSnapshot = this.rifle.snapshot;
     this.player.setEnabled(false);
@@ -228,9 +309,26 @@ export class Game {
       safeRadius: ENEMY_INITIAL_SAFE_RADIUS,
     });
     this.enemies.init(this.context);
+    this.playerAvatar = createEnemySoldier(-1, 0, this.enemies.sharedAssets);
+    this.playerAvatar.root.visible = false;
+    this.playerAvatar.setRenderDetail(true, false);
+    this.rendering.scene.add(this.playerAvatar.root);
+    this.throwView = new THREE.Group();
+    this.throwView.name = "utility-viewmodel";
+    this.throwView.visible = false;
+    this.rendering.viewScene.add(this.throwView);
+    this.pendingThrow = null;
+    this.shoulderCamera = new ShoulderCamera(this.rendering.camera, this.physics);
+    this.context.visualMuzzle = (out) => this.state.shoulderView && this.shoulderCamera.active
+      && !(this.rifle.options.scope && this.rifle.ads > 0.52)
+      && this.playerAvatar.weaponId === this.activeWeaponId
+      ? this.playerAvatar.muzzleWorld(out) : null;
+    this.throwables = new Throwables(this.context, { enemies: this.enemies });
+    this.enemies.visionOccluded = (from, to) => this.throwables.blocksVision(from, to);
+    this.enemies.isStunned = (id) => this.throwables.isStunned(id);
     this.state.requiredKills = BASE_ENEMY_COUNT;
 
-    this.audio = new AudioSystem();
+    this.audio = new AudioSystem({ volume: this.state.controls.volume / 100 });
     this.audio.init(this.context);
     this.ui = new UI({
       container: document.body,
@@ -243,6 +341,7 @@ export class Game {
     this.ready = true;
     this.exposeTestInterface();
     if (this.captureMode) this.setCapturePose(this.captureMode);
+    else this.applyMenuCamera();
   }
 
   installLifecycle() {
@@ -250,6 +349,13 @@ export class Game {
     window.addEventListener("resize", () => {
       const size = this.rendering.resize();
       this.events.emit("render:resize", size);
+    }, { signal });
+    window.addEventListener("keydown", (event) => {
+      if (this.state.phase === "armory" && event.code === "Escape") {
+        event.preventDefault();
+        if (this.state.preDeployment) this.events.emit("game:menu", { source: "armory-back" });
+        else this.closeArmory();
+      }
     }, { signal });
     window.addEventListener("blur", () => {
       if (this.state.phase === "playing" && !this.options.capture) {
@@ -264,44 +370,111 @@ export class Game {
     }, { signal });
 
     this.unsubscribers.push(
-      this.events.on("game:start", () => this.activateMatch()),
+      this.events.on("game:start", (event) => this.activateMatch(event?.mode, event?.armory)),
+      this.events.on("armory:open", () => this.openArmory()),
+      this.events.on("armory:close", () => this.closeArmory()),
+      this.events.on("armory:buy", ({ id }) => this.buyEquipment(id)),
+      this.events.on("game:menu", () => this.returnToMenu()),
+      this.events.on("controls:change", (settings) => this.applyControls(settings)),
       this.events.on("game:pause", () => this.applyPause()),
       this.events.on("game:resume", () => this.applyResume()),
       this.events.on("game:restart", () => this.applyRestart()),
       this.events.on("game:next-level", () => this.advanceLevel()),
       this.events.on("quality:change", (event) =>
-        this.applyQuality(event?.name ?? event?.preset ?? event)),
+        this.applyQuality(event?.name ?? event?.preset ?? event, event?.source === "ui")),
       this.events.on("input:pointer-lock", ({ locked }) => {
         if (!locked && this.state.phase === "playing" && !this.options.capture) {
           this.events.emit("game:pause", { source: "pointer-lock-loss" });
         }
+      }),
+      this.events.on("weapon:fire", (shot) => {
+        if (shot.kind !== "enemy") {
+          this.inOpeningArea = false;
+          if (this.range.active) this.range.fire();
+        }
+      }),
+      this.events.on("projectile:impact", (event) => {
+        if (this.range.impact(event)) {
+          this.events.emit("combat:hitmarker", { headshot: event.hitZone === "center" });
+        }
+      }),
+      this.events.on("projectile:expired", (event) => this.range.miss(event.owner)),
+      this.events.on("weapon:melee", () => { this.inOpeningArea = false; }),
+      this.events.on("player:damage", () => {
+        this.inOpeningArea = false;
+        if (this.state.mission) this.relayMission.interrupt();
       }),
       this.events.on("enemy:death", (event) => this.onEnemyDeath(event)),
       this.events.on("player:death", (event) => this.onPlayerDeath(event)),
     );
   }
 
-  activateMatch() {
-    if (this.state.phase === "playing") return;
+  activateMatch(mode = "sweep", startInArmory = false) {
+    if (this.state.phase === "playing" || this.state.phase === "armory") return;
     if (this.state.phase === "victory" || this.state.phase === "defeat") {
       this.applyRestart();
       return;
     }
-    this.state.phase = "playing";
-    this.captureOverride = null;
-    this.player.setEnabled(true);
-    this.rifle.setEnabled(true);
-    this.input.enabled = true;
-    this.clock.clearAccumulator();
+    this.state.mode = mode === "range" ? "range" : mode === "relay" && this.relayMission ? "relay" : "sweep";
+    this.state.mission = this.state.mode === "relay" ? this.relayMission.state : null;
+    const practice = this.state.mode === "range";
+    const spawn = practice ? RANGE_SPAWN : this.state.mode === "relay" ? this.world.relaySpawn : this.world.spawn;
+    this.player.setSpawn(spawn.position, spawn.yaw);
+    if (practice) this.economy.startPractice();
+    else this.economy.resetCampaign();
+    this._resetRound({ deferPointerLock: startInArmory });
     this.audio.resume();
+    if (startInArmory) this.openArmory({ preDeployment: true });
+  }
+
+  returnToMenu() {
+    this.cancelThrow();
+    this.state.phase = "menu";
+    this.state.preDeployment = false;
+    this.state.range = null;
+    this.range.stop();
+    this.state.shoulderView = false;
+    this.state.mode = "sweep";
+    this.state.mission = null;
+    this.relayMission?.reset();
+    this.setDistrictPowerStage(0);
+    this.syncRelaySignals();
+    this.throwables.reset();
+    this.state.armoryAvailable = false;
+    this.state.level = 1;
+    this.state.seed = this.baseSeed;
+    if (this.world.spawn) this.player.setSpawn(this.world.spawn.position, this.world.spawn.yaw);
+    this.player.reset(this.baseSeed);
+    this.player.setEnabled(false);
+    this.rifle.setEnabled(false);
+    this.input.enabled = false;
+    this.input.reset();
+    this.input.exitPointerLock();
+    this.clock.clearAccumulator();
+  }
+
+  requestPointerLock() {
     if (!this.options.capture && !this.manualSimulation) {
-      this.input.requestPointerLock().catch(() => {});
+      this.input.requestPointerLock().catch(() => {
+        if (this.state.phase === "playing") {
+          this.events.emit("game:pause", { source: "pointer-lock-unavailable" });
+        }
+      });
     }
+  }
+
+  applyControls(settings) {
+    this.state.controls = normalizeControls(settings);
+    this.player.applyControls(this.state.controls);
+    this.audio.setMasterVolume(this.state.controls.volume / 100);
+    saveControls(this.state.controls);
   }
 
   applyPause() {
     if (this.state.phase !== "playing") return;
+    this.cancelThrow();
     this.state.phase = "paused";
+    this.relayMission?.clearHold();
     this.player.setEnabled(false);
     this.rifle.setEnabled(false);
     this.input.enabled = false;
@@ -318,20 +491,21 @@ export class Game {
     this.input.enabled = true;
     this.clock.clearAccumulator();
     this.audio.resume();
-    if (!this.options.capture && !this.manualSimulation) {
-      this.input.requestPointerLock().catch(() => {});
-    }
+    this.requestPointerLock();
   }
 
   applyRestart() {
+    this.economy.retry();
     this._resetRound();
   }
 
   advanceLevel() {
-    if (this.state.phase !== "victory") return false;
+    if (this.state.phase !== "victory" || this.state.mode !== "sweep") return false;
     this.state.level += 1;
     this.state.seed = deriveLevelSeed(this.baseSeed, this.state.level);
     this.state.requiredKills = this._enemyCountForLevel(this.state.level);
+    this.economy.saveCheckpoint();
+    this.economy.retry();
     this._resetRound();
     return true;
   }
@@ -346,43 +520,232 @@ export class Game {
     );
   }
 
-  _resetRound() {
+  _resetRound({ deferPointerLock = false } = {}) {
+    this.cancelThrow();
+    const practice = this.state.mode === "range";
     this.state.phase = "playing";
+    this.state.preDeployment = false;
     this.state.kills = 0;
     this.state.elapsed = 0;
-    this.state.requiredKills = this._enemyCountForLevel();
+    this.state.requiredKills = practice ? 0 : this._enemyCountForLevel();
+    this.relayMission?.reset();
+    this.setDistrictPowerStage(0);
+    this.syncRelaySignals();
     this.rng.reset(this.state.seed);
     this.input.reset();
     this.player.reset(this.state.seed);
-    this.rifle.reset(this.state.seed);
+    for (const weapon of this.weaponInstances.values()) {
+      weapon.reset(this.state.seed);
+      weapon.setEnabled(false);
+    }
+    this.selectWeapon("primary", false);
+    this.throwables.reset();
+    this.state.throwable = THROWABLE_IDS.find((id) => this.economy.state.supplies[id] > 0) ?? "pulse";
+    this.inOpeningArea = true;
+    this.state.armoryAvailable = true;
     this.effects.reset(this.state.seed);
     this.enemies.reset(this.state.seed, {
       totalCount: this.state.requiredKills,
       activeLimit: ACTIVE_ENEMY_LIMIT,
       playerSpawn: this.player.spawnPosition,
       safeRadius: ENEMY_INITIAL_SAFE_RADIUS,
+      placements: this.state.mode === "relay" ? RELAY_PATROLS : null,
+      announce: this.state.mode === "sweep",
     });
+    if (practice) this.range.start();
+    else this.range.stop();
+    this.state.range = practice ? this.range.state : null;
     this.player.setEnabled(true);
     this.rifle.setEnabled(true);
     this.input.enabled = true;
     this.captureOverride = null;
     this.captureTargetId = null;
     this.clock.clearAccumulator();
-    if (!this.options.capture && !this.manualSimulation) {
-      this.input.requestPointerLock().catch(() => {});
+    if (!deferPointerLock) this.requestPointerLock();
+  }
+
+  selectWeapon(slot, animate = true) {
+    const id = this.economy.state.equipped[slot];
+    if (!id) return false;
+    this.cancelThrow();
+    if (this.activeWeaponId !== id) {
+      this.rifle.holster();
+      let weapon = this.weaponInstances.get(id);
+      if (!weapon) {
+        weapon = new Rifle(this.context, WEAPON_DEFINITIONS[id]);
+        weapon.setEnabled(false);
+        this.weaponInstances.set(id, weapon);
+      }
+      this.rifle = weapon;
+      this.activeWeaponId = id;
+      this.state.weapon = weapon.snapshot;
+      this.state.weaponSnapshot = weapon.snapshot;
+      this.events.emit("weapon:changed", { id, slot });
+    }
+    this.state.equippedSlot = slot;
+    this.playerAvatar?.setWeapon(id);
+    if (this.state.phase === "playing") {
+      if (animate) this.rifle.equip();
+      else this.rifle.setEnabled(true);
+    }
+    return true;
+  }
+
+  armoryLocation() {
+    if (this.state.mode === "range") return "Practice locker";
+    const position = this.player.position;
+    const atDeployment = position.distanceTo(this.player.spawnPosition) <= ARMORY_RADIUS;
+    const unlocked = this.state.mission?.completed ?? 0;
+    const station = atDeployment ? null : this.world.route.find((entry, index) => index < unlocked
+      && position.distanceTo(entry.position) <= FIELD_LOCKER_RADIUS);
+    if (!atDeployment && !station) return null;
+    const nearbyThreat = this.enemies.enemies.some((enemy) => enemy.alive
+      && enemy.rig.root.position.distanceToSquared(position) < FIELD_LOCKER_THREAT_RADIUS ** 2);
+    if (nearbyThreat) return null;
+    return atDeployment ? "Deployment locker" : `${station.label} field locker`;
+  }
+
+  openArmory({ preDeployment = false } = {}) {
+    if (this.state.phase !== "playing") return false;
+    const location = this.armoryLocation();
+    if (!location) {
+      this.events.emit("ui:announce", { text: "Armory requires a secure locker", tone: "warning", duration: 1.6 });
+      return false;
+    }
+    this.cancelThrow();
+    this.state.phase = "armory";
+    this.state.preDeployment = preDeployment;
+    this.relayMission?.clearHold();
+    this.player.setEnabled(false);
+    this.rifle.setEnabled(false);
+    this.input.enabled = false;
+    this.input.reset();
+    this.input.exitPointerLock();
+    this.clock.clearAccumulator();
+    this.events.emit("armory:opened", { location, preDeployment });
+    return true;
+  }
+
+  closeArmory() {
+    if (this.state.phase !== "armory") return false;
+    this.state.phase = "playing";
+    this.state.preDeployment = false;
+    this.player.setEnabled(true);
+    this.rifle.equip();
+    this.input.enabled = true;
+    this.clock.clearAccumulator();
+    this.audio.resume();
+    this.events.emit("armory:closed");
+    this.requestPointerLock();
+    return true;
+  }
+
+  buyEquipment(id) {
+    if (this.state.phase !== "armory" || !this.economy.buy(id)) return false;
+    const item = this.economy.items.get(id);
+    if (item.slot) this.selectWeapon(item.slot, false);
+    if (item.kind === "throwable") this.state.throwable = id;
+    if (item.kind === "service") {
+      for (const weaponId of this.economy.state.owned) this.weaponInstances.get(weaponId)?.restockReserve();
+    }
+    if (this.inOpeningArea || this.state.mode === "range") this.economy.saveCheckpoint();
+    this.events.emit("audio:play", { name: "ui-confirm", volume: 0.7 });
+    this.events.emit("armory:changed", {
+      message: item.kind === "service" ? "Reserve ammunition restocked"
+        : item.slot ? `${item.label} equipped` : `${item.label} stocked`,
+    });
+    return true;
+  }
+
+  updateEquipmentInput() {
+    this.state.armoryAvailable = Boolean(this.armoryLocation());
+    if (this.inOpeningArea && this.player.position.distanceTo(this.player.spawnPosition) > ARMORY_RADIUS) {
+      this.inOpeningArea = false;
+    }
+    if (this.input.consumePressed("KeyB") && this.openArmory()) return;
+    if (this.input.consumePressed("KeyV")) {
+      this.state.shoulderView = !this.state.shoulderView;
+      this.events.emit("ui:announce", {
+        text: this.state.shoulderView ? "Shoulder view" : "First-person view",
+        tone: "neutral", duration: 1.1,
+      });
+    }
+    for (const [key, slot] of Object.entries(WEAPON_KEYS)) {
+      if (this.input.consumePressed(key) && (this.state.equippedSlot !== slot || this.pendingThrow)) this.selectWeapon(slot);
+    }
+    for (const [key, id] of Object.entries(THROWABLE_KEYS)) {
+      if (this.input.consumePressed(key)) this.state.throwable = id;
+    }
+    if (this.input.consumePressed("KeyT") && !this.pendingThrow) {
+      const id = this.state.throwable;
+      if (!(this.economy.state.supplies[id] > 0)) {
+        this.events.emit("ui:announce", { text: "Selected pouch is empty", tone: "warning", duration: 1.1 });
+      } else this.startThrow(id);
     }
   }
 
-  applyQuality(name) {
+  startThrow(id) {
+    const item = this.enemies.sharedAssets.weapons.create(id);
+    this.rifle.holster();
+    const hand = this.weaponInstances.get("vesper").rightSleeve.parent.clone(true);
+    hand.position.set(0.068, -0.035, 0.033);
+    hand.rotation.set(-0.74, 0.12, -0.62);
+    this.throwView.add(item.root, hand);
+    this.throwView.visible = true;
+    this.pendingThrow = { id, elapsed: 0 };
+    this.playerAvatar.setWeapon(id);
+    this.updateThrowView();
+  }
+
+  updateThrowView() {
+    const progress = Math.min(this.pendingThrow.elapsed / THROW_WINDUP, 1);
+    const windup = Math.sin(progress * Math.PI);
+    this.throwView.position.set(0.29 + windup * 0.10, -0.33 + progress * 0.31,
+      -0.49 + windup * 0.12 - progress * 0.19);
+    this.throwView.rotation.set(-0.55 + progress * 0.88, -0.17, -0.4 + progress * 0.52);
+  }
+
+  cancelThrow() {
+    if (!this.pendingThrow) return;
+    this.pendingThrow = null;
+    this.throwView.clear();
+    this.throwView.visible = false;
+    this.playerAvatar.setWeapon(this.activeWeaponId);
+  }
+
+  updateThrow(dt) {
+    if (!this.pendingThrow) return;
+    this.pendingThrow.elapsed += dt;
+    this.updateThrowView();
+    if (this.pendingThrow.elapsed < THROW_WINDUP) return;
+    this.updatePlayerAvatar(0, 1);
+    const { id } = this.pendingThrow;
+    if (this.throwables.throw(id, this.player, this.playerAvatar.heldPosition(_throwPosition))) {
+      this.economy.use(id);
+      this.inOpeningArea = false;
+    } else {
+      this.events.emit("ui:announce", { text: "Utility is still active", tone: "warning", duration: 1.1 });
+    }
+    this.cancelThrow();
+    this.rifle.equip();
+  }
+
+  applyQuality(name, persist = false) {
     if (!["low", "medium", "high"].includes(name)) return;
     this.context.quality = this.rendering.applyQuality(name);
     this.state.quality = this.context.quality.name;
+    if (persist) {
+      this.state.controls.quality = name;
+      saveControls(this.state.controls);
+    }
   }
 
   onEnemyDeath() {
     if (this.state.phase !== "playing") return;
     this.state.kills += 1;
-    if (this.state.kills >= this.state.requiredKills) {
+    this.inOpeningArea = false;
+    this.economy.reward(CREDIT_REWARDS.elimination);
+    if (this.state.mode === "sweep" && this.state.kills >= this.state.requiredKills) {
       this.finishMatch("victory");
     }
   }
@@ -392,14 +755,22 @@ export class Game {
   }
 
   finishMatch(result) {
+    this.cancelThrow();
     this.state.phase = result;
-    if (result === "victory") {
+    let personalBest = false;
+    if (result === "victory") this.economy.reward(CREDIT_REWARDS.victory);
+    if (result === "victory" && this.state.mode === "sweep") {
       const persisted = writeHighestClearedLevel(this.state.level);
       this.state.highestClearedLevel = Math.max(
         this.state.highestClearedLevel,
         persisted,
         this.state.level,
       );
+    }
+    if (result === "victory" && this.state.mode === "relay") {
+      const extraction = recordExtraction(this.state.relayRecord, this.state.elapsed);
+      this.state.relayRecord = extraction.record;
+      personalBest = extraction.personalBest;
     }
     this.player.setEnabled(false);
     this.rifle.setEnabled(false);
@@ -412,6 +783,11 @@ export class Game {
       level: this.state.level,
       highestClearedLevel: this.state.highestClearedLevel,
       requiredKills: this.state.requiredKills,
+      mode: this.state.mode,
+      mission: this.state.mission,
+      economy: this.economy.snapshot(),
+      personalBest,
+      relayRecord: this.state.relayRecord,
     });
   }
 
@@ -422,29 +798,100 @@ export class Game {
       }
       return;
     }
+    this.updateEquipmentInput();
+    if (this.state.phase !== "playing") return;
     this.state.elapsed += dt;
     this.player.fixedUpdate(dt);
-    this.rifle.fixedUpdate(dt);
+    if (this.state.phase !== "playing") return;
+    this.player.syncAimCamera();
+    this.updateThrow(dt);
+    if (this.shoulderCamera.active && this.state.shoulderView) this.updatePlayerAvatar(0, 1);
+    for (const weapon of this.weaponInstances.values()) weapon.fixedUpdate(dt);
+    if (this.state.phase !== "playing") return;
+    this.throwables.fixedUpdate(dt);
     this.enemies.fixedUpdate(dt);
     this.effects.fixedUpdate(dt);
+    if (this.range.active) this.range.update(dt);
+    if (this.state.phase === "playing" && this.state.mission) {
+      this.updateRelayMission(dt);
+    }
+  }
+
+  syncRelaySignals() {
+    const mission = this.state.mission;
+    const completed = mission ? this.world.route.slice(0, mission.completed).map(({ id }) => id) : [];
+    this.world.setRouteStatus?.(mission?.target?.id ?? null, completed);
+  }
+
+  setDistrictPowerStage(stage) {
+    this.rendering.setExchangePowerStage?.(stage);
+    return this.world.setPowerStage?.(stage);
+  }
+
+  updateRelayMission(dt) {
+    const decoy = this.relayMission.updateDecoy(dt, this.input.consumePressed("KeyG"));
+    if (decoy) {
+      const { position, stage } = decoy;
+      const responders = this.enemies.lurePatrols(position);
+      if (!this.state.controls.reducedMotion) this.rendering.pulseExchange?.(position);
+      this.events.emit("relay:decoy", { position, stage, responders });
+      this.events.emit("audio:play", { name: "relay-pulse", position, volume: 0.8 });
+      this.events.emit("ui:announce", {
+        text: responders > 0
+          ? `${responders} ${responders === 1 ? "patrol diverted" : "patrols diverted"}`
+          : "Decoy fired · no patrol diverted",
+        tone: "neutral",
+        duration: 2.1,
+      });
+    }
+
+    const previousTarget = this.relayMission.state.target;
+    const result = this.relayMission.update(dt, this.player.position, this.input.isDown("KeyF"));
+    if (!result) return;
+    this.syncRelaySignals();
+    this.events.emit("audio:play", { name: "ui-confirm", volume: 0.7 });
+    if (result === "extracted") {
+      this.finishMatch("victory");
+      return;
+    }
+    this.inOpeningArea = false;
+    this.economy.reward(CREDIT_REWARDS.relay);
+    const { completed, total } = this.relayMission.state;
+    const power = this.setDistrictPowerStage(completed);
+    const label = power?.label ?? previousTarget.label;
+    const position = power?.alertPosition ?? previousTarget.position;
+    this.relayMission.chargeDecoy(label, position);
+    this.events.emit("relay:power", { position, stage: completed });
+    this.events.emit("ui:announce", {
+      text: completed === total ? "Grid restored · proceed to extraction" : `${label} powered`,
+      tone: "success",
+      duration: 2.3,
+    });
   }
 
   update(dt, alpha = 1) {
     this.player.update(dt, alpha);
     this.rifle.update(dt, alpha);
+    if (!this.captureOverride) {
+      const camera = this.rendering.camera;
+      const fov = THREE.MathUtils.lerp(72, this.rifle.snapshot.adsFov ?? 61, this.rifle.ads);
+      if (Math.abs(camera.fov - fov) > 0.015) {
+        camera.fov = fov;
+        camera.updateProjectionMatrix();
+      }
+    }
     this.enemies.update(dt, alpha);
     this.effects.update(dt, alpha);
-    this.audio.setListener(this.rendering.camera);
     if (this.captureOverride) this.applyCaptureCamera();
+    else if (this.state.phase === "menu") this.applyMenuCamera();
+    this.audio.setListener(this.rendering.camera);
     this.ui.render({
       dt,
       player: this.player.snapshot,
       weapon: this.rifle.snapshot,
-      effects: this.effects.snapshot,
-      enemies: this.enemies.snapshot,
       state: this.state,
     });
-    this.rendering.render();
+    this.renderFrame(dt, alpha);
     this.diagnostics.recordFrame(dt);
     this.diagnostics.rendererInfo = {
       memory: { ...this.rendering.renderer.info.memory },
@@ -453,7 +900,63 @@ export class Game {
     this.diagnostics.set("listeners", this.events.listenerCount());
     this.diagnostics.set("enemies", this.enemies.livingCount);
     this.diagnostics.set("particles", this.effects.snapshot.activeParticles);
-    this.input.endFrame();
+  }
+
+  updatePlayerAvatar(dt, alpha) {
+    const { player, playerAvatar: avatar, rifle } = this;
+    const snapshot = player.snapshot;
+    const { options } = rifle;
+    const position = avatar.root.position.lerpVectors(player.previousPosition, player.position, alpha);
+    avatar.setGround(position.y);
+    avatar.root.rotation.y = snapshot.yaw;
+    avatar.setWeapon(this.pendingThrow?.id ?? this.activeWeaponId);
+    const speed = snapshot.speed;
+    const sin = Math.sin(snapshot.yaw);
+    const cos = Math.cos(snapshot.yaw);
+    const normalSpeed = Math.max(0.001, speed);
+    avatar.animate(
+      dt,
+      snapshot.grounded ? Math.min(speed / player.options.walkSpeed, 1) : 0,
+      options.melee || this.pendingThrow ? 0 : Math.max(rifle.ads, snapshot.sprinting ? 0 : 0.52),
+      rifle.visualRecoil > 0.24,
+      0,
+      false,
+      {
+        aimDirection: this.rendering.camera.getWorldDirection(_avatarAim),
+        crouch: THREE.MathUtils.clamp(1 - (player.stanceHeight - player.options.crouchingHeight)
+          / (player.options.standingHeight - player.options.crouchingHeight), 0, 1),
+        airborne: !snapshot.grounded,
+        sliding: snapshot.sliding,
+        speed,
+        forward: (-player.velocity.x * sin - player.velocity.z * cos) / normalSpeed,
+        strafe: (player.velocity.x * cos - player.velocity.z * sin) / normalSpeed,
+        pitch: snapshot.pitch,
+        reload: rifle.snapshot.reloadProgress,
+        draw: rifle.drawRemaining / options.drawDuration,
+        swing: rifle.swingElapsed === null ? 0 : rifle.swingElapsed / options.fireInterval,
+        sprint: Number(snapshot.sprinting),
+        throwProgress: this.pendingThrow ? Math.min(1, this.pendingThrow.elapsed / THROW_WINDUP) : 0,
+      },
+    );
+  }
+
+  renderFrame(dt, alpha) {
+    const playing = this.state.phase === "playing";
+    const canObserve = this.state.shoulderView && !this.captureOverride
+      && (playing || this.state.phase === "paused" || this.state.phase === "armory")
+      && this.rifle.inspectRemaining === 0
+      && !(this.rifle.options.scope && this.rifle.ads > 0.52);
+    if (playing && (canObserve || this.pendingThrow)) {
+      this.updatePlayerAvatar(Math.min(dt, 0.05), alpha);
+    }
+    this.shoulderCamera.active = false;
+    const observed = canObserve && this.shoulderCamera.prepare(this.player);
+    this.playerAvatar.root.visible = observed;
+    try {
+      this.rendering.render(playing && !this.state.controls.reducedMotion ? dt : 0, !observed);
+    } finally {
+      if (observed) this.shoulderCamera.restore();
+    }
   }
 
   start() {
@@ -463,13 +966,14 @@ export class Game {
     const loop = (timestamp) => {
       if (!this.running) return;
       if (!this.manualSimulation) {
-        const frame = this.clock.tick(
-          timestamp * 0.001,
-          (dt) => this.fixedUpdate(dt),
-        );
+        this.player.sampleLook();
+        const frame = this.clock.tick(timestamp * 0.001, (dt) => {
+          this.fixedUpdate(dt);
+          this.input.endFrame();
+        });
         this.update(frame.frame, frame.alpha);
       } else if (!this.performanceRunning) {
-        this.rendering.render();
+        this.renderFrame(0, 1);
       }
       this.raf = requestAnimationFrame(loop);
     };
@@ -478,7 +982,10 @@ export class Game {
 
   async manualStep(frames = 1) {
     const count = THREE.MathUtils.clamp(Math.floor(frames), 0, 3600);
-    for (let i = 0; i < count; i += 1) this.fixedUpdate(FIXED_STEP);
+    for (let i = 0; i < count; i += 1) {
+      this.fixedUpdate(FIXED_STEP);
+      this.input.endFrame();
+    }
     // Fixed simulation can be advanced in one deterministic batch, but
     // presentation dampers must still receive the elapsed wall-clock span.
     // Cap it to avoid feeding multi-second deltas into camera/effect easing.
@@ -497,7 +1004,9 @@ export class Game {
     const startingShot = this.rifle.shotIndex;
     this.rifle.triggerDown();
     let guard = 0;
-    while (this.rifle.shotIndex - startingShot < shots && guard < shots * 12) {
+    const maxSteps = Math.ceil((this.rifle.options.fireInterval + 0.5) / FIXED_STEP) * shots + 60;
+    while (this.rifle.shotIndex - startingShot < shots && guard < maxSteps) {
+      if (!this.rifle.options.automatic) this.rifle.triggerDown();
       this.fixedUpdate(FIXED_STEP);
       guard += 1;
     }
@@ -729,9 +1238,19 @@ export class Game {
     _captureQuaternion.copy(this.rendering.camera.quaternion);
   }
 
+  applyMenuCamera() {
+    const camera = this.rendering.camera;
+    camera.position.copy(MENU_CAMERA_POSITION);
+    camera.lookAt(MENU_CAMERA_TARGET);
+  }
+
   stateSnapshot() {
     return {
       phase: this.state.phase,
+      mode: this.state.mode,
+      range: this.state.range ? { ...this.state.range } : null,
+      relayRecord: this.state.relayRecord,
+      mission: this.state.mission ? structuredClone(this.state.mission) : null,
       level: this.state.level,
       baseEnemyCount: this.state.baseEnemyCount,
       highestClearedLevel: this.state.highestClearedLevel,
@@ -740,6 +1259,11 @@ export class Game {
       elapsed: this.state.elapsed,
       seed: this.state.seed,
       quality: this.state.quality,
+      economy: this.economy.snapshot(),
+      equippedSlot: this.state.equippedSlot,
+      shoulderView: this.state.shoulderView,
+      throwable: this.state.throwable,
+      armoryAvailable: this.state.armoryAvailable,
     };
   }
 
@@ -765,6 +1289,7 @@ export class Game {
         moveState: this.player.snapshot.moveState,
       },
       weapon: { ...this.rifle.snapshot },
+      throwables: this.throwables.snapshot,
       enemies: this.enemies.snapshot.enemies.map((enemy) => ({
         ...enemy,
         position: vectorSnapshot(enemy.position),
@@ -807,8 +1332,8 @@ export class Game {
         ...this.diagnostics.snapshot(),
         rendererInfo: this.diagnostics.rendererInfo,
       }),
-      start: async () => {
-        this.events.emit("game:start", { source: "test" });
+      start: async (mode = "sweep") => {
+        this.events.emit("game:start", { source: "test", mode });
         return this.stateSnapshot();
       },
       pause: async () => {
@@ -835,6 +1360,10 @@ export class Game {
       },
       snapshot: () => this.snapshot(),
       setInput: (record) => this.input.setSynthetic(record),
+      missionRoute: () => this.relayMission?.checkpoints.map((checkpoint) => ({
+        ...checkpoint,
+        position: vectorSnapshot(checkpoint.position),
+      })),
       step: (frames) => this.manualStep(frames),
       teleport: async (position, yaw = 0) => {
         if (toVector(position, _capturePosition)) {
@@ -888,9 +1417,15 @@ export class Game {
     this.unsubscribers.length = 0;
     this.ui.dispose();
     this.audio.dispose();
+    this.throwables.dispose();
+    this.range.dispose();
+    this.cancelThrow();
+    this.throwView.removeFromParent();
+    this.playerAvatar.dispose();
     this.enemies.dispose();
     this.effects.dispose();
-    this.rifle.dispose();
+    for (const weapon of this.weaponInstances.values()) weapon.dispose();
+    this.weaponInstances.clear();
     this.player.dispose();
     this.input.dispose();
     this.worldBuilder.dispose?.();

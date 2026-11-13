@@ -1,7 +1,7 @@
-# Final visual review
+# July 2026 visual review
 
-This review covers the seven 1440×810 captures recorded in
-`artifacts/captures/manifest.json` (`mode: full`, deterministic seed
+This historical review covers the seven 1440×810 captures recorded in
+`artifacts/captures/manifest.json` at revision `0bc9309` (`mode: full`, deterministic seed
 `0x0c1de71e`). Scores are based on rendered pixels, not source-code intent.
 
 ## Verdict

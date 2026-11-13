@@ -1,6 +1,23 @@
+import { ARMORY_STYLES, Armory } from "./Armory.js";
+
+const CONTROL_FIELDS = `
+  <h2 class="cl-setting-heading">Aim and camera</h2>
+  <label class="cl-setting"><span>Mouse speed <output data-control-value="sensitivity"></output></span>
+    <input type="range" data-control="sensitivity" min="20" max="220" step="5">
+  </label>
+  <label class="cl-setting"><span>Aim speed <output data-control-value="adsSensitivity"></output></span>
+    <input type="range" data-control="adsSensitivity" min="25" max="100" step="5">
+  </label>
+  <label class="cl-setting cl-check"><input type="checkbox" data-control="reducedMotion"> Reduce camera sway</label>
+  <label class="cl-setting"><span>Master volume <output data-control-value="volume"></output></span>
+    <input type="range" data-control="volume" min="0" max="100" step="1">
+  </label>
+`;
+
 const UI_STYLE_ID = 'cinderline-ui-styles';
 
 const UI_STYLES = `
+${ARMORY_STYLES}
 :root {
   --cl-ink: #e9eee6;
   --cl-muted: #aab6ad;
@@ -27,7 +44,22 @@ const UI_STYLES = `
     linear-gradient(100deg, rgba(5,9,9,.94) 0 35%, rgba(6,11,11,.62) 58%, rgba(5,9,9,.2)),
     radial-gradient(circle at 72% 48%, rgba(186,120,42,.11), transparent 45%);
 }
-.cl-screen.is-visible { display:grid; }
+.cl-screen.is-visible { display:grid; overflow:auto; }
+.cl-start {
+  background:linear-gradient(90deg, rgba(4,9,12,.96), rgba(4,9,12,.8) 27%, rgba(4,9,12,.15) 61%, transparent 85%),
+    linear-gradient(0deg, rgba(4,9,12,.74), transparent 35%);
+}
+.cl-start .cl-panel { grid-template-columns:minmax(360px, 1fr) minmax(245px, .48fr); }
+.cl-start .cl-panel::before { display:none; }
+.cl-start .cl-title { font-size:clamp(68px, 9vw, 130px); line-height:.76; letter-spacing:-.07em; }
+.cl-start .cl-controls { align-self:end; padding:14px 16px; }
+.cl-start .cl-controls[open] { background:rgba(8,15,19,.91); }
+.cl-start .cl-controls summary {
+  color:var(--cl-ink); cursor:pointer; font-size:10px; font-weight:700; line-height:1.5; letter-spacing:.13em;
+}
+.cl-start .cl-controls[open] summary { margin-bottom:13px; }
+.cl-start .cl-controls summary::marker { color:var(--cl-accent); }
+.cl-start .cl-controls summary:focus-visible { outline:1px solid var(--cl-accent); outline-offset:4px; }
 .cl-panel {
   width:min(1120px, calc(100vw - 80px)); min-height:min(640px, calc(100vh - 70px));
   display:grid; grid-template-columns:minmax(360px, 1.15fr) minmax(270px, .65fr);
@@ -89,11 +121,26 @@ const UI_STYLES = `
   letter-spacing:.12em; text-transform:uppercase;
 }
 .cl-quality button:hover,.cl-quality button.is-active { color:#111; background:var(--cl-accent); border-color:var(--cl-accent); }
+.cl-setting-heading { margin-top:22px !important; margin-bottom:10px !important; }
+.cl-setting { display:grid; grid-template-columns:1fr 110px; align-items:center; gap:8px; min-height:26px;
+  color:#c3ccc4; font-size:10px; text-transform:none; letter-spacing:.06em; }
+.cl-setting input { accent-color:var(--cl-accent); min-width:0; }
+.cl-setting output { color:var(--cl-accent); padding-left:5px; }
+.cl-check { display:flex; align-items:center; margin-top:3px; cursor:pointer; }
 .cl-status-title { font-size:clamp(58px,9vw,128px); }
-.cl-status-data { display:flex; gap:34px; margin:38px 0 32px; }
+.cl-status-data { display:flex; gap:24px; flex-wrap:wrap; margin:28px 0 24px; }
 .cl-stat { min-width:100px; border-top:1px solid var(--cl-line); padding-top:9px; }
 .cl-stat strong { display:block; color:var(--cl-accent); font-size:28px; letter-spacing:-.02em; }
 .cl-stat span { color:var(--cl-muted); font-size:9px; letter-spacing:.18em; }
+.cl-debrief { margin:18px 0 0; color:#c4d4cc; font-size:13px; line-height:1.5; text-transform:none; }
+.cl-record[data-relay-record] { margin-top:10px; }
+.cl-range-summary {
+  width:min(440px,92vw); margin:5px auto 0; padding:9px 12px; color:#e9eee6;
+  border:1px solid #526561; background:#111c22e8; font-size:11px; line-height:1.45;
+}
+.cl-range-summary strong { color:#f0c47d; }
+.cl-range-summary p { margin:5px 0 0; color:#b8ced1; text-transform:none; letter-spacing:.025em; }
+.cl-range-data { display:flex; gap:5px 12px; justify-content:center; flex-wrap:wrap; }
 .cl-hud { position:absolute; inset:0; opacity:1; transition:opacity .16s; }
 .cl-hud.is-hidden { opacity:0; }
 .cl-topbar { position:absolute; top:21px; left:50%; transform:translateX(-50%); width:min(620px,58vw); text-align:center; }
@@ -113,6 +160,34 @@ const UI_STYLES = `
 }
 .cl-objective b { color:var(--cl-ink); font-size:11px; }
 .cl-objective i { width:5px; height:5px; background:var(--cl-accent); transform:rotate(45deg); box-shadow:0 0 8px var(--cl-accent); }
+.cl-objective > [hidden], .cl-route[hidden], .cl-route-hint[hidden], .cl-interact[hidden], .cl-btn[hidden] { display:none; }
+.cl-route {
+  display:flex; align-items:center; justify-content:center; gap:9px; width:max-content; max-width:100%;
+  margin:7px auto 0; padding:6px 12px; color:#e9eee6; background:rgba(6,12,17,.8);
+  border:1px solid rgba(186,208,217,.24); font-size:11px; font-weight:700;
+}
+.cl-route-arrow { width:15px; height:15px; display:grid; place-items:center; color:var(--route-accent,var(--cl-accent)); }
+.cl-route-distance { color:var(--route-accent,var(--cl-accent)); }
+.cl-route-hint {
+  display:table; margin:3px auto 0; padding:2px 7px; color:#d8ded9; background:rgba(6,12,17,.63);
+  font-size:11px; letter-spacing:.03em; text-transform:none; line-height:1.5;
+}
+.cl-interact {
+  position:absolute; top:calc(50% + 52px); left:50%; transform:translateX(-50%);
+  width:min(270px,85vw); text-align:center; border:1px solid rgba(207,225,226,.32);
+  background:rgba(7,12,16,.92); font-size:10px; line-height:1.65; padding:8px 14px;
+}
+.cl-interact kbd { display:inline-block; padding:1px 5px; margin-right:5px; border:1px solid #8c9da1; color:var(--cl-accent); }
+.cl-interact-meter { margin-top:6px; height:3px; background:#293338; overflow:hidden; }
+.cl-interact-meter i { display:block; height:100%; background:var(--cl-accent); transform-origin:left; }
+.cl-decoy {
+  position:absolute; left:32px; bottom:106px; display:flex; gap:9px; align-items:center;
+  padding:6px 9px; color:#bcf3f4; background:rgba(8,20,26,.88);
+  border-left:2px solid #79dbe9; font-size:10px; line-height:1.15; letter-spacing:.10em;
+}
+.cl-decoy[hidden] { display:none; }
+.cl-decoy kbd { color:#e4fbff; border:1px solid #76a9af; padding:2px 4px; }
+.cl-decoy.is-queued { border-color:var(--cl-accent); color:#f8ce92; }
 .cl-bottom-left { position:absolute; left:32px; bottom:27px; display:flex; align-items:flex-end; gap:18px; }
 .cl-health-mark {
   width:62px; height:62px; display:grid; place-items:center; position:relative;
@@ -128,6 +203,38 @@ const UI_STYLES = `
 .cl-health-label span { display:block; color:var(--cl-muted); font-size:9px; }
 .cl-health-label b { display:block; margin-top:4px; font-size:10px; letter-spacing:.16em; }
 .cl-bottom-right { position:absolute; right:32px; bottom:28px; text-align:right; }
+.cl-armory-hud { position:absolute; top:28px; left:30px; color:#e9c88d; text-shadow:0 2px 6px #000; }
+.cl-armory-hud b { font-size:18px; letter-spacing:.03em; }
+.cl-armory-hud span { display:block; margin-top:3px; color:#d3d9d2; font-size:9px; }
+.cl-kitbar { display:flex; justify-content:flex-end; gap:5px; margin-bottom:10px; }
+.cl-kitbar i {
+  display:grid; place-items:center; width:21px; height:20px; color:#c6d0d1;
+  background:rgba(8,15,19,.7); border:1px solid #374c50; font:700 9px Arial,sans-serif;
+}
+.cl-kitbar i.is-equipped { color:#1d2524; background:#e2b977; border-color:#e2b977; }
+.cl-utility-hud {
+  position:absolute; left:50%; bottom:38px; transform:translateX(-50%);
+  display:flex; align-items:center; gap:5px; color:#e6eae4; font-size:10px;
+}
+.cl-utility-hud[hidden] { display:none; }
+.cl-utility-hud span { background:rgba(10,19,24,.83); padding:5px 7px; border:1px solid #354a4e; }
+.cl-utility-hud span.is-selected { color:#abebed; border-color:#6caeb4; }
+.cl-utility-hud kbd { font-size:9px; color:#e3bd7d; }
+.cl-scope {
+  position:absolute; inset:0; opacity:0; transition:opacity .1s; pointer-events:none;
+  background:radial-gradient(circle at center, transparent 0 33vmin, rgba(2,4,5,.36) 34vmin, #020405 36vmin);
+}
+.cl-scope.is-active { opacity:1; }
+.cl-scope::before,.cl-scope::after {
+  content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  background:#0b1112; box-shadow:0 0 1px #e4f6f0;
+}
+.cl-scope::before { width:66vmin; height:1px; }
+.cl-scope::after { width:1px; height:66vmin; }
+.cl-scope-dot {
+  position:absolute; left:50%; top:50%; width:3px; height:3px;
+  transform:translate(-50%,-50%); border-radius:50%; background:#fcd199; box-shadow:0 0 4px #fce6bb;
+}
 .cl-weapon-name { color:var(--cl-muted); font-size:9px; margin-bottom:3px; }
 .cl-ammo { display:flex; justify-content:flex-end; align-items:baseline; gap:9px; text-shadow:0 2px 8px #000; }
 .cl-ammo-current { font:900 48px/.85 Arial,sans-serif; letter-spacing:-.07em; }
@@ -186,7 +293,12 @@ const UI_STYLES = `
 .cl-pause-tip { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); color:rgba(230,235,227,.45); font-size:8px; }
 @media (max-width: 760px) {
   .cl-panel { width:calc(100vw - 44px); grid-template-columns:1fr; gap:28px; align-content:center; }
-  .cl-controls { display:none; } .cl-bottom-left{left:18px}.cl-bottom-right{right:18px}
+  .cl-panel { padding:30px 0; } .cl-controls { display:none; } .cl-pause .cl-controls { display:block; }
+  .cl-start .cl-panel { grid-template-columns:1fr; }
+  .cl-start .cl-controls { display:block; max-width:340px; }
+  .cl-decoy { left:18px; } .cl-armory-hud { top:80px; left:18px; }
+  .cl-utility-hud { bottom:76px; font-size:8px; }
+  .cl-bottom-left{left:18px}.cl-bottom-right{right:18px} .cl-topbar{width:min(94vw,560px)}
 }
 `;
 
@@ -296,22 +408,33 @@ export class UI {
       <section class="cl-screen cl-start" data-screen="start" aria-label="Start screen">
         <div class="cl-panel">
           <div>
-            <div class="cl-kicker" data-start-operation>OPERATION 1 · ASH MARKET</div>
+            <div class="cl-kicker">ASH MARKET</div>
             <h1 class="cl-title">CINDER<br>LINE<small>ONE SHOT</small></h1>
-            <p class="cl-mission">Sweep the Ash Market industrial quarter. Break contact when needed, use cover, and neutralize every hostile in the district.</p>
+            <p class="cl-mission">Restore the district power network, use the service routes it opens, and reach Cross Street.</p>
             <div class="cl-record" data-highest-cleared hidden></div>
+            <div class="cl-record" data-relay-record hidden></div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="start">Deploy</button>
+              <button class="cl-btn" data-action="sweep">Endless sweep</button>
+              <button class="cl-btn" data-action="armory-deploy">Armory</button>
+              <button class="cl-btn" data-action="range">Practice range</button>
             </div>
           </div>
-          <div class="cl-controls">
-            <h2>Field controls</h2>
+          <details class="cl-controls">
+            <summary>Controls and settings</summary>
             <div class="cl-control"><kbd>W A S D</kbd><span>Move through the district</span></div>
             <div class="cl-control"><kbd>Mouse · LMB</kbd><span>Aim · fire</span></div>
             <div class="cl-control"><kbd>RMB · R</kbd><span>Aim down sight · reload</span></div>
             <div class="cl-control"><kbd>Shift · Ctrl / C</kbd><span>Sprint · crouch / slide</span></div>
             <div class="cl-control"><kbd>Space</kbd><span>Jump / mantle</span></div>
             <div class="cl-control"><kbd>Q · E</kbd><span>Lean left · right</span></div>
+            <div class="cl-control"><kbd>Hold F</kbd><span>Operate a relay or extract</span></div>
+            <div class="cl-control"><kbd>G</kbd><span>Send a decoy to the last powered relay</span></div>
+            <div class="cl-control"><kbd>B</kbd><span>Open a secure armory locker</span></div>
+            <div class="cl-control"><kbd>V</kbd><span>Toggle shoulder view</span></div>
+            <div class="cl-control"><kbd>I</kbd><span>Inspect equipped weapon</span></div>
+            <div class="cl-control"><kbd>1 / 2 / 3</kbd><span>Primary, sidearm, melee</span></div>
+            <div class="cl-control"><kbd>4 / 5 / 6 · T</kbd><span>Select a throwable · throw</span></div>
             <div class="cl-control"><kbd>Esc</kbd><span>Pause / release pointer lock</span></div>
             <h2 style="margin-top:22px">Render profile</h2>
             <div class="cl-quality" role="group" aria-label="Graphics quality">
@@ -319,7 +442,8 @@ export class UI {
               <button data-quality="medium">Medium</button>
               <button data-quality="high">High</button>
             </div>
-          </div>
+            ${CONTROL_FIELDS}
+          </details>
         </div>
       </section>
       <section class="cl-screen cl-pause" data-screen="pause" aria-label="Pause screen">
@@ -327,10 +451,11 @@ export class UI {
           <div>
             <div class="cl-kicker">TACTICAL HOLD</div>
             <h1 class="cl-title cl-status-title">PAUSED</h1>
-            <p class="cl-mission">Simulation suspended. Input has been cleared and weapon controls are safe.</p>
+            <p class="cl-mission" data-pause-message>Adjust aim and graphics or return to the operation.</p>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="resume">Resume</button>
               <button class="cl-btn" data-action="restart">Restart operation</button>
+              <button class="cl-btn" data-action="menu">Main menu</button>
             </div>
           </div>
           <div class="cl-controls">
@@ -340,6 +465,7 @@ export class UI {
               <button data-quality="medium">Medium</button>
               <button data-quality="high">High</button>
             </div>
+            ${CONTROL_FIELDS}
           </div>
         </div>
       </section>
@@ -348,13 +474,17 @@ export class UI {
           <div>
             <div class="cl-kicker" data-victory-operation>OPERATION 1 · DISTRICT SECURE</div>
             <h1 class="cl-title cl-status-title">CLEAR</h1>
+            <p class="cl-debrief" data-result-summary hidden></p>
             <div class="cl-status-data">
               <div class="cl-stat"><strong data-result-kills>0</strong><span>Hostiles</span></div>
               <div class="cl-stat"><strong data-result-time>00:00</strong><span>Elapsed</span></div>
+              <div class="cl-stat"><strong data-result-credits>0</strong><span>Credits earned</span></div>
+              <div class="cl-stat" data-result-relays hidden><strong></strong><span>Relays restored</span></div>
             </div>
             <div class="cl-button-row">
               <button class="cl-btn is-primary" data-action="next-level">Next operation</button>
-              <button class="cl-btn" data-action="restart">Restart current</button>
+              <button class="cl-btn" data-action="restart">Replay</button>
+              <button class="cl-btn" data-action="menu">Main menu</button>
             </div>
           </div>
         </div>
@@ -364,24 +494,56 @@ export class UI {
           <div>
             <div class="cl-kicker">SIGNAL LOST</div>
             <h1 class="cl-title cl-status-title">DOWN</h1>
+            <p class="cl-debrief" data-result-summary hidden></p>
             <div class="cl-status-data">
               <div class="cl-stat"><strong data-result-kills>0</strong><span>Neutralized</span></div>
               <div class="cl-stat"><strong data-result-time>00:00</strong><span>Elapsed</span></div>
+              <div class="cl-stat"><strong data-result-credits>0</strong><span>Credits earned</span></div>
+              <div class="cl-stat" data-result-relays hidden><strong></strong><span>Relays restored</span></div>
             </div>
-            <button class="cl-btn is-primary" data-action="restart">Redeploy</button>
+            <div class="cl-button-row">
+              <button class="cl-btn is-primary" data-action="restart">Redeploy</button>
+              <button class="cl-btn" data-action="menu">Main menu</button>
+            </div>
           </div>
         </div>
       </section>
       <div class="cl-hud is-hidden" aria-label="Heads up display">
+        <div class="cl-scope" aria-hidden="true"><i class="cl-scope-dot"></i></div>
+        <div class="cl-armory-hud"><b data-field-credits></b><span data-locker-hint>B · Armory</span></div>
         <div class="cl-topbar">
           <div class="cl-compass"><span data-cardinal>N</span><span class="cl-heading" data-heading>000</span></div>
-          <div class="cl-objective"><span class="cl-operation">Operation <b data-level>1</b></span><i></i><span>Neutralize hostiles</span><b><span data-kills>0</span> / <span data-required>7</span></b></div>
+          <div class="cl-objective"><span class="cl-operation">Operation <b data-level>1</b></span><i></i><span data-objective-name>Neutralize hostiles</span><b data-sweep-progress><span data-kills>0</span> / <span data-required>7</span></b><b data-relay-progress hidden>0 / 3</b></div>
+          <div class="cl-route" hidden><span class="cl-route-arrow" aria-hidden="true">▲</span><span data-route-label></span><span class="cl-route-distance" data-route-distance></span></div>
+          <p class="cl-route-hint" data-route-hint hidden></p>
+          <div class="cl-range-summary" data-range-summary hidden>
+            <div class="cl-range-data">
+              <span>Shots <strong data-range-shots>0</strong></span>
+              <span>Hits <strong data-range-hits>0</strong></span>
+              <span>Centers <strong data-range-centers>0</strong></span>
+              <span>Accuracy <strong data-range-accuracy>0%</strong></span>
+              <span>Best streak <strong data-range-best>0</strong></span>
+            </div>
+            <p data-range-hint>Hit the plates at 6, 13 and 20 m. B opens the free arsenal.</p>
+          </div>
         </div>
+        <div class="cl-decoy" hidden><kbd>G</kbd><span data-decoy-label></span></div>
         <div class="cl-bottom-left">
           <div class="cl-health-mark" style="--health-angle:360deg"><span class="cl-health-value" data-health>100</span></div>
           <div class="cl-health-label"><span>Condition</span><b data-condition>Operational</b></div>
         </div>
+        <div class="cl-utility-hud" hidden>
+          <span data-pouch="pulse"><kbd>4</kbd> Pulse <b></b></span>
+          <span data-pouch="haze"><kbd>5</kbd> Haze <b></b></span>
+          <span data-pouch="stasis"><kbd>6</kbd> Stasis <b></b></span>
+          <kbd>T · Throw</kbd>
+        </div>
         <div class="cl-bottom-right">
+          <div class="cl-kitbar" aria-label="Weapon slots">
+            <i data-weapon-slot="primary" aria-label="Primary">1</i>
+            <i data-weapon-slot="secondary" aria-label="Sidearm">2</i>
+            <i data-weapon-slot="melee" aria-label="Melee">3</i>
+          </div>
           <div class="cl-weapon-name" data-weapon-name>CR-27 Vesper</div>
           <div class="cl-ammo"><span class="cl-ammo-current" data-magazine>30</span><span class="cl-ammo-divider">/</span><span class="cl-ammo-reserve" data-reserve>120</span></div>
           <div class="cl-reload" data-reload></div>
@@ -391,6 +553,7 @@ export class UI {
           <i class="cl-crosshair-piece v t"></i><i class="cl-crosshair-piece v b"></i>
           <i class="cl-crosshair-dot"></i>
         </div>
+        <div class="cl-interact" hidden><kbd>F</kbd><span data-interact-label></span><div class="cl-interact-meter"><i></i></div></div>
         <div class="cl-hitmarker"><i></i><i></i><i></i><i></i></div>
         <div class="cl-damage-ring"></div>
         <div class="cl-damage-vignette"></div>
@@ -399,11 +562,19 @@ export class UI {
         <div class="cl-pause-tip">Esc · pause</div>
       </div>
     `;
+    this.armory = new Armory(this.root, this.context.assets.armory, this.events);
     (this.options.container ?? document.body).appendChild(this.root);
 
     const query = (selector) => this.root.querySelector(selector);
     this.nodes.hud = query('.cl-hud');
     this.nodes.crosshair = query('.cl-crosshair');
+    this.nodes.scope = query('.cl-scope');
+    this.nodes.ammoDisplay = query('.cl-ammo');
+    this.nodes.fieldCredits = query('[data-field-credits]');
+    this.nodes.lockerHint = query('[data-locker-hint]');
+    this.nodes.utility = query('.cl-utility-hud');
+    this.nodes.pouches = [...this.root.querySelectorAll('[data-pouch]')].map((node) => ({ node, count: node.querySelector('b') }));
+    this.nodes.slots = [...this.root.querySelectorAll('[data-weapon-slot]')];
     this.nodes.hitmarker = query('.cl-hitmarker');
     this.nodes.damageRing = query('.cl-damage-ring');
     this.nodes.damageVignette = query('.cl-damage-vignette');
@@ -419,11 +590,32 @@ export class UI {
     this.nodes.kills = query('[data-kills]');
     this.nodes.required = query('[data-required]');
     this.nodes.level = query('[data-level]');
-    this.nodes.startOperation = query('[data-start-operation]');
     this.nodes.highestCleared = query('[data-highest-cleared]');
+    this.nodes.relayRecord = query('[data-relay-record]');
+    this.nodes.range = query('[data-range-summary]');
+    this.nodes.rangeShots = query('[data-range-shots]');
+    this.nodes.rangeHits = query('[data-range-hits]');
+    this.nodes.rangeCenters = query('[data-range-centers]');
+    this.nodes.rangeAccuracy = query('[data-range-accuracy]');
+    this.nodes.rangeBest = query('[data-range-best]');
+    this.nodes.rangeHint = query('[data-range-hint]');
     this.nodes.victoryOperation = query('[data-victory-operation]');
     this.nodes.heading = query('[data-heading]');
     this.nodes.cardinal = query('[data-cardinal]');
+    this.nodes.objective = query('[data-objective-name]');
+    this.nodes.sweepProgress = query('[data-sweep-progress]');
+    this.nodes.relayProgress = query('[data-relay-progress]');
+    this.nodes.route = query('.cl-route');
+    this.nodes.routeArrow = query('.cl-route-arrow');
+    this.nodes.routeLabel = query('[data-route-label]');
+    this.nodes.routeDistance = query('[data-route-distance]');
+    this.nodes.routeHint = query('[data-route-hint]');
+    this.nodes.interact = query('.cl-interact');
+    this.nodes.interactLabel = query('[data-interact-label]');
+    this.nodes.interactFill = query('.cl-interact-meter i');
+    this.nodes.decoy = query('.cl-decoy');
+    this.nodes.decoyLabel = query('[data-decoy-label]');
+    this.nodes.pauseMessage = query('[data-pause-message]');
 
     this.root.querySelectorAll('[data-action]').forEach((button) => {
       const handler = () => this._action(button.dataset.action);
@@ -435,17 +627,56 @@ export class UI {
       button.addEventListener('click', handler);
       this.domListeners.push(() => button.removeEventListener('click', handler));
     });
+    this.root.querySelectorAll('[data-control]').forEach((input) => {
+      const name = input.dataset.control;
+      const update = () => {
+        const value = input.type === 'checkbox' ? input.checked : input.valueAsNumber;
+        emit(this.events, 'controls:change', { ...this.context.state.controls, [name]: value });
+        this._syncControls();
+      };
+      input.addEventListener('change', update);
+      this.domListeners.push(() => input.removeEventListener('change', update));
+    });
+    this._syncControls();
     this._setQuality(this.quality, false);
+  }
+
+  _syncControls() {
+    const settings = this.context.state.controls;
+    this.root.querySelectorAll('[data-control]').forEach((input) => {
+      const value = settings[input.dataset.control];
+      if (input.type === 'checkbox') input.checked = value;
+      else input.value = String(value);
+    });
+    this.root.querySelectorAll('[data-control-value]').forEach((output) => {
+      output.textContent = `${settings[output.dataset.controlValue]}%`;
+    });
   }
 
   _bindEvents() {
     this.unsubscribers.push(
       subscribe(this.events, 'game:start', () => this.setScreen('playing')),
-      subscribe(this.events, 'game:pause', () => this.setScreen('pause')),
+      subscribe(this.events, 'armory:opened', ({ location, preDeployment }) => {
+        this.setScreen('armory');
+        this.armory.open(location, preDeployment);
+      }),
+      subscribe(this.events, 'armory:closed', () => this.setScreen('playing')),
+      subscribe(this.events, 'armory:changed', ({ message }) => this.armory.update(message)),
+      subscribe(this.events, 'weapon:changed', () => {
+        this._text('reload', '');
+        this.crosshairKick = 0;
+      }),
+      subscribe(this.events, 'game:pause', ({ source } = {}) => {
+        this.nodes.pauseMessage.textContent = source === 'pointer-lock-unavailable'
+          ? 'Mouse capture failed. Click Resume to try again.'
+          : 'Adjust aim and graphics or return to the operation.';
+        this.setScreen('pause');
+      }),
+      subscribe(this.events, 'game:menu', () => this.setScreen('start')),
       subscribe(this.events, 'game:resume', () => this.setScreen('playing')),
       subscribe(this.events, 'game:restart', () => this.reset()),
       subscribe(this.events, 'game:next-level', () => {
-        this.reset('NEXT OPERATION DEPLOYED');
+        if (this.context.state.phase === 'playing') this.reset('NEXT OPERATION DEPLOYED');
       }),
       subscribe(this.events, 'game:victory', (data) => this.setScreen('victory', data)),
       subscribe(this.events, 'game:defeat', (data) => this.setScreen('defeat', data)),
@@ -459,16 +690,6 @@ export class UI {
           this.crosshairKick = Math.min(14, this.crosshairKick + 4.5);
         }
       }),
-      subscribe(this.events, 'weapon:reload-start', () => {
-        this.nodes.reload.textContent = 'Reloading';
-      }),
-      subscribe(this.events, 'weapon:reload-phase', (data) => {
-        const phase = String(data?.phase ?? '').replaceAll('-', ' ');
-        this.nodes.reload.textContent = phase || 'Reloading';
-      }),
-      subscribe(this.events, 'weapon:reload-complete', () => {
-        this.nodes.reload.textContent = '';
-      }),
       subscribe(this.events, 'combat:hitmarker', (data) => this._showHitmarker(data)),
       subscribe(this.events, 'combat:kill', (data) => this._showKill(data)),
       subscribe(this.events, 'ui:announce', (data) => {
@@ -478,9 +699,14 @@ export class UI {
   }
 
   _action(action) {
-    if (action === 'start') {
-      emit(this.events, 'game:start', { source: 'ui' });
+    if (['start', 'sweep', 'armory-deploy', 'range'].includes(action)) {
+      const mode = action === 'sweep' ? 'sweep' : action === 'range' ? 'range' : 'relay';
+      emit(this.events, 'game:start', { source: 'ui', mode, armory: action === 'armory-deploy' });
       emit(this.events, 'audio:play', { name: 'ui-confirm' });
+    } else if (action === 'armory-close') {
+      emit(this.events, 'armory:close');
+    } else if (action === 'menu') {
+      emit(this.events, 'game:menu', { source: 'ui' });
     } else if (action === 'resume') {
       emit(this.events, 'game:resume', { source: 'ui' });
       emit(this.events, 'audio:play', { name: 'ui-confirm' });
@@ -509,17 +735,40 @@ export class UI {
   setScreen(name, data = {}) {
     const canonical = name === 'play' || name === 'game' ? 'playing' : name;
     this._updateProgression(data);
+    if (this.screen === 'armory' && canonical !== 'armory') this.armory.close();
     this.screen = canonical;
     this.root.querySelectorAll('[data-screen]').forEach((screen) => {
       screen.classList.toggle('is-visible', screen.dataset.screen === canonical);
     });
     this.nodes.hud.classList.toggle('is-hidden', canonical !== 'playing');
+    if (canonical !== 'playing' && canonical !== 'armory' && canonical !== 'capture') {
+      this.root.querySelector(`[data-screen="${canonical}"] .cl-btn.is-primary:not([hidden])`)
+        ?.focus({ preventScroll: true });
+    }
     if (canonical === 'victory' || canonical === 'defeat') {
       const screen = this.root.querySelector(`[data-screen="${canonical}"]`);
       const kills = Number(data?.kills ?? this.last.kills ?? 0);
       const elapsed = Number(data?.elapsed ?? this.last.elapsed ?? 0);
       screen.querySelector('[data-result-kills]').textContent = String(kills);
-      screen.querySelector('[data-result-time]').textContent = this._formatTime(elapsed);
+      screen.querySelector('[data-result-time]').textContent = this._formatTime(elapsed, Boolean(data.mission));
+      screen.querySelector('[data-result-credits]').textContent = String(data?.economy?.earned ?? 0);
+      const relays = screen.querySelector('[data-result-relays]');
+      const summary = screen.querySelector('[data-result-summary]');
+      relays.hidden = !data.mission;
+      summary.hidden = !data.mission;
+      if (data.mission) {
+        relays.querySelector('strong').textContent = `${data.mission.completed} / ${data.mission.total}`;
+        summary.textContent = canonical === 'victory'
+          ? data.personalBest ? 'Personal best · Extracted from Ash Market' : 'Extracted from Ash Market'
+          : `Run ended at ${data.mission.target?.label ?? 'Ash Market'}`;
+      }
+      if (canonical === 'victory') {
+        const relay = data?.mode === 'relay';
+        screen.querySelector('[data-action="next-level"]').hidden = relay;
+        this.nodes.victoryOperation.textContent = relay ? 'RELAY RUN · EXTRACTED'
+          : `OPERATION ${this.context.state.level} · DISTRICT SECURE`;
+        if (relay) screen.querySelector('[data-action="restart"]').focus({ preventScroll: true });
+      }
     }
     if (data?.requiredKills !== undefined) {
       this.nodes.required.textContent = String(data.requiredKills);
@@ -535,12 +784,14 @@ export class UI {
       0,
     );
     this._text('level', level);
-    this.nodes.startOperation.textContent = `OPERATION ${level} · ASH MARKET`;
-    this.nodes.victoryOperation.textContent =
-      `OPERATION ${level} · DISTRICT SECURE`;
+
     this.nodes.highestCleared.hidden = highest <= 0;
     this.nodes.highestCleared.textContent =
       highest > 0 ? `HIGHEST CLEARED · OPERATION ${highest}` : '';
+    const record = contextState.relayRecord;
+    this.nodes.relayRecord.hidden = !record;
+    this._text('relayRecord', record
+      ? `RELAY RUN · BEST ${this._formatTime(record.bestMilliseconds / 1000, true)} · ${record.clears} ${record.clears === 1 ? 'CLEAR' : 'CLEARS'}` : '');
   }
 
   render(snapshot = {}) {
@@ -556,7 +807,7 @@ export class UI {
     const level = positiveSafeInteger(state.level ?? snapshot.level, 1);
     const elapsed = Number(state.elapsed ?? snapshot.elapsed ?? 0);
     const yaw = Number(player.yaw ?? snapshot.yaw ?? this.context?.camera?.rotation?.y ?? 0);
-    const ads = Boolean(weapon.ads ?? weapon.isADS ?? player.ads);
+    const ads = Number(weapon.ads ?? weapon.isADS ?? player.ads) > 0.72;
     const speed = Number(player.speed ?? player.velocity?.length?.() ?? 0);
     const baseSpread = Number(weapon.spread ?? weapon.crosshairSpread ?? (ads ? 1.5 : 7 + speed * 0.7));
     this.crosshairKick = Math.max(0, this.crosshairKick - 22 * (snapshot.dt ?? 1 / 60));
@@ -570,6 +821,7 @@ export class UI {
     this._text('level', level);
     this._updateProgression(state);
     if (weapon.name) this._text('weaponName', weapon.name);
+    this._renderEquipment(state, weapon);
     this.last.kills = kills;
     this.last.elapsed = elapsed;
     this.nodes.healthMark.style.setProperty('--health-angle', `${health * 3.6}deg`);
@@ -581,11 +833,14 @@ export class UI {
     this.nodes.condition.style.color = health <= 30 ? 'var(--cl-alert)' : '';
     this.nodes.crosshair.style.setProperty('--spread', `${spread.toFixed(1)}px`);
     this.nodes.crosshair.classList.toggle('is-ads', ads);
+    this.nodes.crosshair.hidden = Boolean(weapon.scoped);
 
     let degrees = ((-yaw * 180 / Math.PI) % 360 + 360) % 360;
     if (Math.abs(degrees - 360) < 0.5) degrees = 0;
-    this.nodes.heading.textContent = String(Math.round(degrees)).padStart(3, '0');
-    this.nodes.cardinal.textContent = CARDINALS[Math.round(degrees / 45) % 8];
+    this._text('heading', String(Math.round(degrees)).padStart(3, '0'));
+    this._text('cardinal', CARDINALS[Math.round(degrees / 45) % 8]);
+    this._renderMission(state.mission, player, yaw);
+    this._renderRange(state.range);
 
     const now = performance.now();
     if (now > this.hitmarkerUntil) {
@@ -604,6 +859,82 @@ export class UI {
         arc.node.remove();
         this.damageArcs.splice(i, 1);
       }
+    }
+  }
+
+  _renderEquipment(state, weapon) {
+    this.nodes.scope.classList.toggle('is-active', Boolean(weapon.scoped));
+    this.nodes.ammoDisplay.hidden = Boolean(weapon.melee);
+    const equipment = state.economy;
+    if (!equipment) return;
+    this._text('fieldCredits', state.range ? 'Practice' : `${equipment.credits.toLocaleString('en-US')} CR`);
+    this.nodes.lockerHint.hidden = !state.armoryAvailable;
+    for (const node of this.nodes.slots) {
+      node.classList.toggle('is-equipped', node.dataset.weaponSlot === state.equippedSlot);
+    }
+    let anyUtility = false;
+    for (const { node, count } of this.nodes.pouches) {
+      const available = equipment.supplies[node.dataset.pouch] ?? 0;
+      const selected = node.dataset.pouch === state.throwable;
+      if (available > 0) anyUtility = true;
+      node.classList.toggle('is-selected', selected);
+      count.textContent = state.range ? '∞' : String(available);
+    }
+    this.nodes.utility.hidden = !anyUtility;
+    const action = weapon.reloading ? 'Reloading'
+      : weapon.action === 'draw' ? 'Equipping'
+        : weapon.action === 'bolt' ? 'Cycling' : '';
+    this._text('reload', action);
+  }
+
+  _renderRange(range) {
+    this.nodes.range.hidden = !range;
+    if (!range) return;
+    this.nodes.sweepProgress.hidden = true;
+    this._text('objective', 'Practice range');
+    this._text('rangeShots', range.shots);
+    this._text('rangeHits', range.hits);
+    this._text('rangeCenters', range.centers);
+    this._text('rangeAccuracy', range.shots > 0 ? `${Math.round(100 * range.hits / range.shots)}%` : '0%');
+    this._text('rangeBest', range.best);
+    this._text('rangeHint', range.last || 'Hit the plates at 6, 13 and 20 m. B opens the free arsenal.');
+  }
+
+  _renderMission(mission, player, yaw) {
+    const target = mission?.target;
+    const decoy = mission?.decoy;
+    const queued = decoy?.remaining > 0;
+    this.nodes.decoy.hidden = !target || !(decoy?.ready || queued);
+    this.nodes.decoy.classList.toggle('is-queued', queued);
+    if (decoy?.ready) this._text('decoyLabel', `Decoy · ${decoy.label}`);
+    if (queued) this._text('decoyLabel', `Signal in ${decoy.remaining.toFixed(1)} s`);
+    const active = Boolean(target);
+    this.nodes.sweepProgress.hidden = Boolean(mission);
+    this.nodes.relayProgress.hidden = !mission;
+    this.nodes.route.hidden = !active;
+    this.nodes.routeHint.hidden = !active || mission.nearby;
+    this.nodes.interact.hidden = !mission?.nearby;
+    if (!active || !player.position) {
+      this._text('objective', mission?.extracted ? 'Extraction complete' : 'Neutralize hostiles');
+      return;
+    }
+
+    const extracting = mission.completed === mission.total;
+    this._text('objective', extracting ? 'Extract' : 'Restore relays');
+    this._text('relayProgress', `${mission.completed} / ${mission.total}`);
+    this._text('routeLabel', target.label);
+    this._text('routeHint', target.description);
+    const dx = target.position.x - player.position.x;
+    const dz = target.position.z - player.position.z;
+    this._text('routeDistance', `${Math.round(Math.hypot(dx, dz))} m`);
+    const angle = Math.atan2(dx, -dz) + yaw;
+    this.nodes.routeArrow.style.transform = `rotate(${angle}rad)`;
+    this.nodes.route.style.setProperty('--route-accent', target.accent);
+
+    if (mission.nearby) {
+      this._text('interactLabel', mission.interrupted ? 'Signal interrupted'
+        : extracting ? 'Hold to extract' : 'Hold to restore relay');
+      this.nodes.interactFill.style.transform = `scaleX(${mission.progress})`;
     }
   }
 
@@ -684,14 +1015,17 @@ export class UI {
     this.announce(announcement, 'neutral', 1.4);
   }
 
-  _formatTime(seconds) {
-    const total = Math.max(0, Math.floor(seconds));
+  _formatTime(seconds, precise = false) {
+    const tenths = Math.max(0, Math.floor(seconds * 10 + 1e-7));
+    const total = Math.floor(tenths / 10);
     const minutes = Math.floor(total / 60);
     const remainder = total % 60;
-    return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+    const time = `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+    return precise ? `${time}.${tenths % 10}` : time;
   }
 
   dispose() {
+    this.armory?.dispose();
     if (this.disposed) return;
     this.disposed = true;
     for (let i = this.unsubscribers.length - 1; i >= 0; i -= 1) {

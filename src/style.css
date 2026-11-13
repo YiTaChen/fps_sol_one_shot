@@ -54,6 +54,19 @@ select:focus-visible {
   outline-offset: 3px;
 }
 
+.boot-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--amber-hot);
+  background: #070b0d;
+  font-size: 0.78rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  z-index: 1;
+}
+
 .boot-error {
   position: fixed;
   inset: 0;

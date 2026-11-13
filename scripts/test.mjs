@@ -15,6 +15,11 @@ import { assertRestartSnapshot } from '../tests/restart-contract.mjs';
 import { runEnemyAiContract } from '../tests/enemy-ai-contract.mjs';
 import { runPhysicsStepContract } from '../tests/physics-step-contract.mjs';
 import { runProgressionContract } from '../tests/progression-contract.mjs';
+import { runRelayAndInputContract } from '../tests/relay-and-input-contract.mjs';
+import { runDistrictRouteContract } from '../tests/district-route-contract.mjs';
+import { runArmoryContract, runBrowserArmoryContract, runPracticeContract } from '../tests/armory-contract.mjs';
+import { runThrowablesContract } from '../tests/throwables-contract.mjs';
+import { runArsenalContract } from '../tests/arsenal-contract.mjs';
 
 const results = [];
 const startedAt = performance.now();
@@ -27,6 +32,8 @@ function pass(name, detail = '') {
 async function main() {
   const physicsContract = runPhysicsStepContract();
   pass('physics step contract', `${physicsContract.checks} collision cases`);
+  const districtRoute = runDistrictRouteContract();
+  pass('district route contract', `${districtRoute.locations} reachable objective locations across ${districtRoute.seeds} seeds`);
   const enemyAiContract = runEnemyAiContract();
   pass(
     'enemy AI contract',
@@ -37,6 +44,12 @@ async function main() {
     'local progression contract',
     `validated through operation ${progressionContract.maximumLevel}`,
   );
+  const armory = runArmoryContract();
+  pass('armory economy', `${armory.openingCredits} opening credits, owned gear, caps, and retry`);
+  runArsenalContract();
+  pass('arsenal contract', 'six silhouettes, weapon inspection, cadence, scope cycle, ammo, and obstructed melee');
+  runThrowablesContract();
+  pass('throwable effects', 'flight, cover, haze sight, stasis, capacity, and reset');
   const server = await ensureServer();
   let browser;
   try {
@@ -493,6 +506,16 @@ async function main() {
       `Pointer-lock loss did not pause/reset input (${JSON.stringify(pointerLock)})`,
     );
     pass('pointer-lock loss and input reset');
+
+    const relay = await runRelayAndInputContract(page);
+    pass('relay route and extraction', '3 relays, early exit, damage, pause, replay');
+    pass('staged power and signal decoy', '3 power stages, one pulse, pause and replay');
+    pass('short click and same-step aim', `yaw difference ${relay.yawError.toFixed(4)} rad`);
+
+    await runBrowserArmoryContract(page);
+    pass('browser armory and combat', '10 item images, zoom, purchases, shoulder equipment, scope, melee, and utility release');
+    await runPracticeContract(page);
+    pass('practice range and deployment', 'target hit, free equipment, safe return, and isolated economy');
 
     const internalDiagnostics = await page.evaluate(
       () => window.__FPS_TEST__.diagnostics(),

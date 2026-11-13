@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createDistrictTextureSet, DISTRICT_SURFACE_FAMILIES } from './DistrictSurfaceTextures.js';
 import {
   createProceduralTextureSet,
   seedFromRng,
@@ -49,11 +50,12 @@ export const MATERIAL_FAMILIES = Object.freeze({
     id: 'plasterOchre',
     label: 'Weathered ochre plaster',
     style: 'plaster',
-    dark: [0.35, 0.18, 0.075],
-    light: [0.86, 0.61, 0.31],
+    dark: [0.28, 0.20, 0.14],
+    light: [0.78, 0.56, 0.35],
     roughness: [0.66, 0.95],
     metalness: 0,
-    normalStrength: 3,
+    normalStrength: 2.1,
+    normalScale: 0.54,
     repeat: 8,
     metersPerTile: 1.4,
     surface: 'plaster',
@@ -62,11 +64,12 @@ export const MATERIAL_FAMILIES = Object.freeze({
     id: 'plasterBlue',
     label: 'Faded mineral-blue plaster',
     style: 'plaster',
-    dark: [0.08, 0.19, 0.2],
-    light: [0.29, 0.57, 0.58],
+    dark: [0.105, 0.165, 0.17],
+    light: [0.34, 0.51, 0.55],
     roughness: [0.68, 0.96],
     metalness: 0,
-    normalStrength: 2.7,
+    normalStrength: 2.0,
+    normalScale: 0.52,
     repeat: 8,
     metersPerTile: 1.35,
     surface: 'plaster',
@@ -75,26 +78,27 @@ export const MATERIAL_FAMILIES = Object.freeze({
     id: 'asphalt',
     label: 'Patched road asphalt',
     style: 'asphalt',
-    dark: [0.018, 0.023, 0.024],
-    light: [0.16, 0.17, 0.16],
-    roughness: [0.72, 0.98],
+    dark: [0.095, 0.105, 0.11],
+    light: [0.24, 0.255, 0.265],
+    roughness: [0.56, 0.94],
     metalness: 0,
-    normalStrength: 4.1,
+    normalStrength: 1.7,
+    normalScale: 0.42,
     repeat: 18,
-    metersPerTile: 1.1,
+    metersPerTile: 2.3,
     surface: 'asphalt',
   },
   dirt: {
     id: 'dirt',
     label: 'Compacted reddish dirt',
     style: 'earth',
-    dark: [0.12, 0.055, 0.025],
-    light: [0.47, 0.27, 0.12],
+    dark: [0.13, 0.105, 0.09],
+    light: [0.44, 0.35, 0.28],
     roughness: [0.78, 0.99],
     metalness: 0,
     normalStrength: 3.6,
     repeat: 10,
-    metersPerTile: 0.9,
+    metersPerTile: 3.0,
     surface: 'dirt',
   },
   sand: {
@@ -167,16 +171,15 @@ export const MATERIAL_FAMILIES = Object.freeze({
     label: 'Dusty architectural glass',
     style: 'glass',
     dark: [0.025, 0.055, 0.065],
-    light: [0.15, 0.31, 0.34],
+    light: [0.19, 0.28, 0.32],
     roughness: [0.08, 0.27],
-    metalness: 0,
+    metalness: 0.27,
     normalStrength: 0.65,
     repeat: 1,
     metersPerTile: 2.2,
     surface: 'glass',
     transparent: true,
-    opacity: 0.52,
-    transmission: 0.12,
+    opacity: 0.57,
     depthWrite: false,
     side: THREE.DoubleSide,
   },
@@ -426,8 +429,57 @@ function resolveStream(service, name) {
   return service;
 }
 
+const WORLD_PROJECTED_STYLES = new Set(['concrete', 'aggregate', 'brick', 'plaster', 'asphalt', 'earth', 'sand']);
+
+function applyWorldWeathering(material, metersPerTile) {
+  material.customProgramCacheKey = () => 'cinderline-world-weathering';
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.materialTileMeters = { value: metersPerTile };
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', `
+      #include <common>
+      uniform float materialTileMeters;
+      varying vec3 vWeatherPosition;
+    `).replace('#include <uv_vertex>', `
+      #include <uv_vertex>
+      vec4 surfacePoint = vec4(position, 1.0);
+      vec3 surfaceDirection = normal;
+      #ifdef USE_INSTANCING
+        surfacePoint = instanceMatrix * surfacePoint;
+        surfaceDirection = mat3(instanceMatrix) * surfaceDirection;
+      #endif
+      vWeatherPosition = (modelMatrix * surfacePoint).xyz;
+      vec3 axis = abs(mat3(modelMatrix) * surfaceDirection);
+      vec2 realUv = axis.y > max(axis.x, axis.z) ? vWeatherPosition.xz
+        : (axis.x > axis.z ? vWeatherPosition.zy : vWeatherPosition.xy);
+      realUv /= materialTileMeters;
+      #ifdef USE_MAP
+        vMapUv = realUv;
+      #endif
+      #ifdef USE_NORMALMAP
+        vNormalMapUv = realUv;
+      #endif
+      #ifdef USE_ROUGHNESSMAP
+        vRoughnessMapUv = realUv;
+      #endif
+    `);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `
+      #include <common>
+      varying vec3 vWeatherPosition;
+    `).replace('#include <map_fragment>', `
+      #include <map_fragment>
+      vec3 weather = vWeatherPosition;
+      float patches = sin(weather.x * 0.61 + sin(weather.z * 0.79))
+        * sin(weather.z * 0.83 + weather.y * 0.72);
+      float streak = sin(weather.x * 6.6 + weather.z * 4.2 + sin(weather.y * 0.8) * 0.2);
+      float soot = smoothstep(0.15, 0.85, patches + 0.14 * streak);
+      float splash = exp(-max(weather.y, 0.0) * 2.0);
+      diffuseColor.rgb *= mix(vec3(1.09, 1.07, 1.05), vec3(0.64, 0.67, 0.70), soot * 0.59 + splash * 0.25);
+    `);
+  };
+}
+
 /**
- * Shared procedural PBR material registry. One instance is intended per Game.
+ * Shared PBR material registry. One instance is intended per Game.
  */
 export class MaterialLibrary {
   constructor(options = {}) {
@@ -436,6 +488,7 @@ export class MaterialLibrary {
       renderer = null,
       textureSize = 256,
       quality = 'medium',
+      authoredSurfaces = null,
     } = options;
     this.rng = resolveStream(rng, 'materials');
     this.renderer = renderer;
@@ -452,7 +505,7 @@ export class MaterialLibrary {
     this.materials = new Map();
     this.textureSets = new Map();
     this.disposed = false;
-    this._createFamilies();
+    this._createFamilies(authoredSurfaces);
   }
 
   static fromContext(context, options = {}) {
@@ -464,32 +517,42 @@ export class MaterialLibrary {
     });
   }
 
-  _createFamilies() {
+  _createFamilies(authoredSurfaces) {
     const anisotropy = Math.min(
       8,
       this.renderer?.capabilities?.getMaxAnisotropy?.() ?? 4,
     );
 
+    const sharedDistrictTextures = new Map();
     for (const recipe of Object.values(MATERIAL_FAMILIES)) {
       const familySeed =
         seedFromRng(this.rng, recipe.id) ^ seedFromString(`cinderline:${recipe.id}`);
-      const textures = createProceduralTextureSet(recipe, familySeed >>> 0, this.textureSize);
+      const source = DISTRICT_SURFACE_FAMILIES[recipe.id];
+      const images = authoredSurfaces?.get(source?.image);
+      let textures;
+      if (images) {
+        textures = sharedDistrictTextures.get(source.image);
+        if (!textures) {
+          textures = createDistrictTextureSet(source.image, images);
+          sharedDistrictTextures.set(source.image, textures);
+        }
+      } else {
+        textures = createProceduralTextureSet(recipe, familySeed >>> 0, this.textureSize);
+      }
       textures.colorMap.anisotropy = anisotropy;
       textures.normalMap.anisotropy = anisotropy;
       textures.roughnessMap.anisotropy = anisotropy;
 
-      const MaterialType = recipe.transmission
-        ? THREE.MeshPhysicalMaterial
-        : THREE.MeshStandardMaterial;
       const materialOptions = {
         name: `pbr:${recipe.id}`,
-        color: 0xffffff,
+        color: images ? source.tint : 0xffffff,
         map: textures.colorMap,
         normalMap: textures.normalMap,
         roughnessMap: textures.roughnessMap,
         roughness: 1,
         metalness: recipe.metalness,
         transparent: recipe.transparent ?? false,
+        forceSinglePass: recipe.transparent ?? false,
         opacity: recipe.opacity ?? 1,
         depthWrite: recipe.depthWrite ?? true,
         side: recipe.side ?? THREE.FrontSide,
@@ -499,17 +562,16 @@ export class MaterialLibrary {
         emissiveMap: recipe.emissive ? textures.colorMap : null,
         emissiveIntensity: recipe.emissiveIntensity ?? 0,
       };
-      if (recipe.transmission) {
-        materialOptions.transmission = recipe.transmission;
-        materialOptions.thickness = 0.025;
-        materialOptions.ior = 1.48;
+      const material = new THREE.MeshStandardMaterial(materialOptions);
+      const metersPerTile = images ? source.tile : recipe.metersPerTile;
+      material.normalScale.setScalar(images ? source.normal : recipe.normalScale ?? 0.72);
+      if (images || WORLD_PROJECTED_STYLES.has(recipe.style)) {
+        applyWorldWeathering(material, metersPerTile);
       }
-      const material = new MaterialType(materialOptions);
-      material.normalScale.set(0.72, 0.72);
       material.userData.family = recipe.id;
       material.userData.surface = recipe.surface;
-      material.userData.metersPerTile = recipe.metersPerTile;
-      material.userData.procedural = true;
+      material.userData.metersPerTile = metersPerTile;
+      material.userData.procedural = !images;
       material.userData.metadata = this.surfaceFor(recipe.surface);
 
       this.materials.set(recipe.id, material);
@@ -547,7 +609,7 @@ export class MaterialLibrary {
     for (const material of this.materials.values()) {
       material.dispose();
     }
-    for (const textures of this.textureSets.values()) {
+    for (const textures of new Set(this.textureSets.values())) {
       textures.colorMap.dispose();
       textures.normalMap.dispose();
       textures.roughnessMap.dispose();

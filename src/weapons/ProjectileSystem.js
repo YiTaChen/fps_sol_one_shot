@@ -6,6 +6,10 @@ const DIRECTION = new THREE.Vector3();
 const NORMAL = new THREE.Vector3();
 const POINT = new THREE.Vector3();
 const REFLECTED = new THREE.Vector3();
+const MELEE_RIGHT = new THREE.Vector3();
+const MELEE_DIRECTION = new THREE.Vector3();
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
+const MELEE_SWEEP = [0, -0.11, 0.11, -0.22, 0.22];
 
 const PENETRATION = Object.freeze({
   glass: { loss: 0.28, damage: 0.82, advance: 0.24 },
@@ -136,6 +140,7 @@ export class ProjectileSystem {
     }
     if (!projectile) {
       projectile = oldest;
+      this._emitMiss(projectile);
       this._deactivate(projectile);
     }
 
@@ -168,6 +173,31 @@ export class ProjectileSystem {
       kind: projectile.kind,
     });
     return projectile.id;
+  }
+
+  strike({ origin, direction, range, damage }) {
+    if (!vectorLike(origin) || !vectorLike(direction) || !this.physics?.raycast) return false;
+    MELEE_RIGHT.crossVectors(direction, UP_AXIS).normalize();
+    let actor = null;
+    let surface = null;
+    for (const offset of MELEE_SWEEP) {
+      MELEE_DIRECTION.copy(direction).addScaledVector(MELEE_RIGHT, offset).normalize();
+      const hit = firstHit(this.physics.raycast(origin, MELEE_DIRECTION, range, 0xffffffff));
+      if (!hit) continue;
+      if (isActorHit(hit)) {
+        if (!actor || hit.distance < actor.hit.distance) actor = { hit, direction: MELEE_DIRECTION.clone() };
+      } else if (!surface || hit.distance < surface.hit.distance) {
+        surface = { hit, direction: MELEE_DIRECTION.clone() };
+      }
+    }
+    const contact = actor ?? surface;
+    if (!contact) return false;
+    this._resolveImpact({
+      id: ++this.sequence, position: origin, velocity: contact.direction,
+      damage, distance: 0, energy: 1, owner: 'player', kind: 'melee',
+    }, contact.hit, contact.direction);
+    this._syncSnapshot();
+    return true;
   }
 
   fixedUpdate(dt) {
@@ -210,6 +240,7 @@ export class ProjectileSystem {
           || projectile.energy < 0.08
         )
       ) {
+        this._emitMiss(projectile);
         this._deactivate(projectile);
       }
     }
@@ -229,7 +260,9 @@ export class ProjectileSystem {
 
     const data = hit?.object?.userData ?? hit?.collider?.userData ?? hit?.userData ?? {};
     const actor = isActorHit(hit);
-    const bodyPart = hit?.hitZone ?? hit?.bodyPart ?? data.bodyPart ?? data.hitZone ?? 'body';
+    const melee = projectile.kind === 'melee';
+    const bodyPart = melee && actor ? 'torso'
+      : hit?.hitZone ?? hit?.bodyPart ?? data.bodyPart ?? data.hitZone ?? 'body';
     const headshot = actor && /head|helmet/.test(String(bodyPart).toLowerCase());
     const dealtDamage = projectile.damage * projectile.energy;
 
@@ -259,7 +292,7 @@ export class ProjectileSystem {
       ricocheted: false,
     };
 
-    if (actor || surface === 'flesh') {
+    if (actor || surface === 'flesh' || melee) {
       emit(this.events, 'projectile:impact', payload);
       this._deactivate(projectile);
       return;
@@ -307,6 +340,11 @@ export class ProjectileSystem {
     projectile.active = false;
     projectile.owner = null;
     this.activeCount = Math.max(0, this.activeCount - 1);
+  }
+
+  _emitMiss(projectile) {
+    if (this.context?.state?.mode !== 'range') return;
+    emit(this.events, 'projectile:expired', { owner: projectile.owner });
   }
 
   _syncSnapshot() {

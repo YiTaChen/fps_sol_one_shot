@@ -1,6 +1,6 @@
 {
   "status": "passed",
-  "durationMs": 567939.834782,
+  "durationMs": 20480.023689999998,
   "results": [
     {
       "name": "physics step contract",
@@ -8,14 +8,34 @@
       "detail": "10 collision cases"
     },
     {
+      "name": "district route contract",
+      "status": "passed",
+      "detail": "4 reachable objective locations across 2 seeds"
+    },
+    {
       "name": "enemy AI contract",
       "status": "passed",
-      "detail": "±35°, 2.88s reaction, 103/240 hits"
+      "detail": "±35°, 2.88s reaction, 102/240 hits"
     },
     {
       "name": "local progression contract",
       "status": "passed",
       "detail": "validated through operation 100000"
+    },
+    {
+      "name": "armory economy",
+      "status": "passed",
+      "detail": "1400 opening credits, owned gear, caps, and retry"
+    },
+    {
+      "name": "arsenal contract",
+      "status": "passed",
+      "detail": "six silhouettes, weapon inspection, cadence, scope cycle, ammo, and obstructed melee"
+    },
+    {
+      "name": "throwable effects",
+      "status": "passed",
+      "detail": "flight, cover, haze sight, stasis, capacity, and reset"
     },
     {
       "name": "game boot",
@@ -40,7 +60,7 @@
     {
       "name": "deterministic movement",
       "status": "passed",
-      "detail": "8.39 m"
+      "detail": "8.49 m"
     },
     {
       "name": "advanced locomotion",
@@ -108,6 +128,31 @@
       "detail": ""
     },
     {
+      "name": "relay route and extraction",
+      "status": "passed",
+      "detail": "3 relays, early exit, damage, pause, replay"
+    },
+    {
+      "name": "staged power and signal decoy",
+      "status": "passed",
+      "detail": "3 power stages, one pulse, pause and replay"
+    },
+    {
+      "name": "short click and same-step aim",
+      "status": "passed",
+      "detail": "yaw difference 0.0072 rad"
+    },
+    {
+      "name": "browser armory and combat",
+      "status": "passed",
+      "detail": "10 item images, zoom, purchases, shoulder equipment, scope, melee, and utility release"
+    },
+    {
+      "name": "practice range and deployment",
+      "status": "passed",
+      "detail": "target hit, free equipment, safe return, and isolated economy"
+    },
+    {
       "name": "console and page errors",
       "status": "passed",
       "detail": "none"
@@ -120,39 +165,39 @@
     "httpErrors": []
   },
   "gameDiagnostics": {
-    "frameCount": 43,
+    "frameCount": 93,
     "medianFrameMs": 50.00000074505806,
     "p95FrameMs": 250,
     "medianFps": 19.99999970197678,
-    "elapsedMs": 557307.2999999998,
+    "elapsedMs": 18244.100000000093,
     "counters": {
-      "listeners": 60,
-      "enemies": 12,
+      "listeners": 85,
+      "enemies": 0,
       "particles": 0
     },
     "errors": [],
     "renderer": {
       "memory": {
-        "geometries": 358,
-        "textures": 88
+        "geometries": 461,
+        "textures": 96
       },
       "render": {
-        "frame": 2289,
-        "calls": 0,
-        "triangles": 0,
+        "frame": 5598,
+        "calls": 106,
+        "triangles": 15862,
         "points": 0,
         "lines": 0
       }
     },
     "rendererInfo": {
       "memory": {
-        "geometries": 358,
-        "textures": 88
+        "geometries": 461,
+        "textures": 96
       },
       "render": {
-        "frame": 2289,
-        "calls": 0,
-        "triangles": 0,
+        "frame": 5598,
+        "calls": 106,
+        "triangles": 15862,
         "points": 0,
         "lines": 0
       }

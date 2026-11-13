@@ -331,12 +331,11 @@ export class Effects {
 
     listen(this.events, 'weapon:fire', (event) => {
       this.spawnMuzzle(event);
+      if (event?.kind === 'enemy' || String(event?.source ?? '').startsWith('enemy:')) return;
       const start = event?.muzzle ?? event?.position;
       const end = event?.tracerEnd;
       if (vectorLike(start) && vectorLike(end)) this.spawnTracer(start, end, 'player');
-      if (event?.kind !== 'enemy' && !String(event?.source ?? '').startsWith('enemy:')) {
-        this._spawnShellFromShot(event);
-      }
+      this._spawnShellFromShot(event);
     }, this._disposers);
     listen(this.events, 'projectile:spawn', (event) => {
       if (event?.kind !== 'enemy') return;
@@ -389,7 +388,7 @@ export class Effects {
     const tracerMaterial = new THREE.MeshBasicMaterial({
       color: 0xffc170,
       transparent: true,
-      opacity: 0.74,
+      opacity: 0.59,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       toneMapped: false,
@@ -501,7 +500,8 @@ export class Effects {
     DIRECTION.copy(direction).normalize();
     QUATERNION.setFromUnitVectors(NEG_Z_AXIS, DIRECTION);
     flash.group.quaternion.copy(QUATERNION);
-    const scale = 0.82 + randomFloat(this.rng) * 0.42;
+    const size = Number(data.flashScale) || 1;
+    const scale = (0.82 + randomFloat(this.rng) * 0.42) * size;
     flash.group.scale.setScalar(scale);
     flash.group.rotation.z += (randomFloat(this.rng) - 0.5) * 1.2;
 
@@ -510,7 +510,8 @@ export class Effects {
     lightSlot.age = 0;
     lightSlot.life = 0.095;
     lightSlot.light.position.copy(position);
-    lightSlot.light.intensity = 3.8;
+    lightSlot.strength = 3.8 * size;
+    lightSlot.light.intensity = lightSlot.strength;
     lightSlot.light.distance = 4.4;
 
     POINT.copy(position).addScaledVector(direction, 0.05);
@@ -537,17 +538,19 @@ export class Effects {
     const tracer = this._claimTimed(this.tracers, this.tracerLimit);
     tracer.active = true;
     tracer.age = 0;
-    tracer.life = kind === 'enemy' ? 0.18 : 0.105;
+    tracer.life = kind === 'enemy' ? 0.12 : 0.08;
     SEGMENT.subVectors(b, a);
-    const length = Math.min(kind === 'enemy' ? 45 : 22, SEGMENT.length());
+    const pathLength = SEGMENT.length();
+    const startOffset = Math.min(kind === 'enemy' ? 3.0 : 2.4, pathLength * 0.28);
+    const length = Math.min(kind === 'enemy' ? 14 : 10, pathLength - startOffset);
     if (length <= 0.001) {
       tracer.active = false;
       return false;
     }
     DIRECTION.copy(SEGMENT).normalize();
-    MIDPOINT.copy(a).addScaledVector(DIRECTION, length * 0.5);
+    MIDPOINT.copy(a).addScaledVector(DIRECTION, startOffset + length * 0.5);
     QUATERNION.setFromUnitVectors(Y_AXIS, DIRECTION);
-    SCALE.set(kind === 'enemy' ? 1.25 : 1, length, kind === 'enemy' ? 1.25 : 1);
+    SCALE.set(kind === 'enemy' ? 0.9 : 0.65, length, kind === 'enemy' ? 0.9 : 0.65);
     MATRIX.compose(MIDPOINT, QUATERNION, SCALE);
     this.tracerMesh.setMatrixAt(tracer.index, MATRIX);
     this.tracerMesh.instanceMatrix.needsUpdate = true;
@@ -836,7 +839,7 @@ export class Effects {
       if (!light.active) continue;
       light.age += dt;
       const fade = Math.max(0, 1 - light.age / light.life);
-      light.light.intensity = 3.8 * fade * fade;
+      light.light.intensity = light.strength * fade * fade;
       if (light.age >= light.life) {
         light.active = false;
         light.light.intensity = 0;

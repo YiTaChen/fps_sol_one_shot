@@ -1,9 +1,10 @@
 # Cinderline: One Shot
 
 An original, deterministic browser tactical FPS built with Three.js and WebGL2.
-Fight through a code-generated industrial market with projectile ballistics,
-reactive combat AI, advanced first-person movement, endless operations, and
-synthesized spatial audio.
+Equip a loadout, restore three relays, and extract from Ash Market. Cinderline
+combines six switchable weapons and three tactical utilities with reactive
+patrols, advanced first-person movement, and synthesized spatial audio. Endless
+Sweep is available from the main menu.
 
 **▶ [Play online](https://fps-gpt56-one-shot.web.app)** · **[Run locally](#quick-start)** ·
 **[Explore the gameplay](#gameplay)** ·
@@ -15,14 +16,10 @@ synthesized spatial audio.
   <br><sub><b>High-quality capture:</b> active combat rendered in the high quality preset.</sub>
 </p>
 
-<p align="center">
-  <img src="artifacts/demo/gameplay-preview.gif" width="720" alt="Gameplay preview showing movement, aiming, and combat in Ash Market">
-  <br><sub><b>Gameplay preview:</b> compressed for fast README loading; the capture above represents the rendered image quality.</sub>
-</p>
-
-The runtime downloads no models, textures, images, or audio samples. Buildings,
-interiors, props, PBR maps, the rifle, hands, soldiers, effects, ambience, and
-sound effects are all constructed from code.
+The Ash Exchange exterior and North Service condenser are Blender meshes. Seven
+surface families use authored PBR maps. The remaining architecture, equipment,
+characters, effects and audio are generated at runtime. The mesh and textures
+ship with the build. [Material provenance](artifacts/material-provenance.md)
 
 ## At a glance
 
@@ -32,16 +29,45 @@ sound effects are all constructed from code.
 | **Engine** | Three.js `0.180.0`, WebGL2, Web Audio |
 | **World** | Authored Ash Market layout with deterministic procedural assembly and dressing |
 | **Simulation** | Fixed `1 / 60 s` gameplay step with isolated seeded RNG streams |
-| **Progression** | Endless operations with `7 × operation` total hostiles |
-| **Asset policy** | No downloaded models, textures, images, or audio samples at runtime |
-| **Validation** | 22/22 automated checks, 7 deterministic captures, zero recorded browser errors |
+| **Modes** | Relay Run, Endless Sweep, and Practice Range |
+| **Armory** | Six weapons, three throwables, reserve ammunition, and in-game credits |
+| **Assets** | Blender exterior mesh, authored PBR textures and procedural world assets |
 
 ## Gameplay
 
-Deploy into Ash Market and neutralize every hostile before your health reaches
-zero. Operation 1 begins with seven soldiers. Clearing it unlocks the next
-operation on the same district with newly seeded enemy positions and a total
-enemy quota of:
+### Relay Run
+
+Choose **Deploy** to restore the relays in Saffron Arcade, North Service and
+Kiln House, then reach the marked Cross Street extraction post. The HUD shows
+the next location, distance and a route hint. Hold **F** at each station until
+the progress bar fills. Leaving the station, releasing the key, getting hit
+or pausing cancels the current hold.
+
+Restoring power opens the arcade service shutter, then the Kiln freight shutter,
+and finally lights the Cross Street extraction beacon. Each relay also charges
+a remote decoy. Press **G** when you want the last powered station to emit an
+audible signal after a short delay. Up to two eligible patrols can investigate
+its location while you move through a different route.
+
+Follow the active station's paint and signs. Powered doors open alternate
+paths at Saffron Arcade and Kiln House. The debrief shows how many relays
+you restored, elapsed time, and credits earned. The main menu remembers
+your fastest extraction and total clears on the current browser.
+See [the operation review](artifacts/operation-review.md) for the current
+route, practice, and extraction captures.
+
+### Practice Range
+
+Choose **Practice range** to try the six weapons and three utilities with no
+enemies or equipment costs. Aim at the 6, 13, and 20 m plates. The range tracks
+shots, hits, center hits, accuracy, and best streak. Press **B** anywhere in
+the range to switch gear. Practice purchases and stats belong to that session.
+
+### Endless Sweep
+
+Choose **Endless Sweep** to clear every enemy before your health reaches zero.
+Operation 1 starts with seven enemies. Clearing it unlocks the next operation
+on the same district with newly seeded positions and the following quota:
 
 ```text
 total hostiles = 7 × current operation
@@ -58,6 +84,40 @@ as untrusted input, validated, bounded, and rendered with `textContent`.
 Client-only storage is convenient rather than tamper-proof; authoritative
 competitive progression would require a backend.
 
+## Armory and credits
+
+Open **Armory** on the main menu to outfit a Relay Run before deploying. Select
+an item image to see its details and in-game model. Drag the model to rotate
+it and use **+ / −** for a closer look. The separate purchase button shows the price
+and availability. Press **B** at the deployment locker or at a powered relay
+when nearby hostiles have been cleared. Each new run starts with **1,400 credits**. An elimination earns
+125, a restored relay earns 250, and an operation clear earns 400. Credits and
+owned weapons carry into the next Endless Sweep operation. A retry restores
+the opening loadout for the current operation and resets rewards earned during
+the attempt.
+
+| Slot | Equipment | Purchase |
+| --- | --- | ---: |
+| Primary | CR-27 Vesper · balanced automatic rifle | Included |
+| Primary | SR-9 Flicker · fast SMG with quicker handling | 430 |
+| Primary | LR-4 Meridian · scoped sniper with a manual cycle | 800 |
+| Secondary | P-12 Ember · quick semi-automatic sidearm | Included |
+| Secondary | H-7 Cinder · slower, heavier sidearm | 300 |
+| Melee | Arc Cutter · close-range swing without ammunition | Included |
+| Throwable | Pulse Orb · nearby damage checked against cover | 230 |
+| Throwable | Haze Orb · temporary hostile sight obstruction | 160 |
+| Throwable | Stasis Orb · temporarily interrupts nearby hostiles | 200 |
+| Supply | Reserve Case · refills reserves for owned firearms | 180 |
+
+Switching weapons preserves the magazine and reserve of each firearm. Already
+owned weapons can be re-equipped in an armory at no charge. Carry up to two of
+each throwable and four total.
+
+The shoulder view shows the current equipment on the player model. A scoped
+weapon uses its optic while aiming, and the camera returns to the player's
+eyes if cover obstructs the shoulder camera. Press **T** to draw and throw
+the selected utility. A charge is spent when the orb leaves the hand.
+
 ## Feature highlights
 
 - **Tactical enemy perception** — soldiers detect only within a 35° half-angle,
@@ -72,9 +132,9 @@ competitive progression would require a backend.
 - **Advanced movement** — sprint, crouch, slide, jump, protected lean, slopes,
   and grounded low-step traversal. The capsule may step or mantle only up to
   0.44 m, preventing tall props and buildings from lifting the player onto roofs.
-- **Reactive enemies** — patrol, investigate, pursue, use cover, reposition,
-  fire, reload, react to hits, buckle when killed, fall fully to the ground, and
-  despawn after a short delay.
+- **Reactive enemies** — four distinct uniforms, articulated foot placement,
+  and hit reactions. Patrols investigate, pursue, use cover, reposition, and
+  reload.
 - **Code-generated presentation** — procedural architecture and props, a
   separate first-person viewmodel scene, pooled combat effects, post-processing,
   and Web Audio synthesis with HRTF positioning.
@@ -106,7 +166,9 @@ quality preset, SHA-256 hashes, combat state, and browser diagnostics.
 
 ## Controls
 
-Click **Deploy** first to enable pointer-lock aiming and browser audio.
+Click **Deploy** or **Endless Sweep** to enable pointer-lock aiming and browser
+audio. The start and pause menus save mouse speed, aim speed, reduced
+camera sway, master volume, and graphics quality in the browser.
 
 | Input | Action |
 |---|---|
@@ -120,6 +182,14 @@ Click **Deploy** first to enable pointer-lock aiming and browser audio.
 | Sprint + `Ctrl` / `C` | Slide |
 | `Space` | Jump; mantle a valid ledge up to 0.44 m |
 | `Q` / `E` | Protected lean left / right |
+| Hold `F` | Operate the active relay or extract |
+| `G` | Queue the decoy at the last powered station |
+| `B` | Open a secure armory locker |
+| `V` | Toggle first-person and shoulder view |
+| `I` | Inspect the equipped weapon |
+| `1` / `2` / `3` | Primary / sidearm / melee |
+| `4` / `5` / `6` | Select Pulse / Haze / Stasis |
+| `T` | Throw the selected utility |
 | `Esc` | Release pointer lock and pause |
 | Menu buttons | Resume, restart, advance operation, or change quality |
 
@@ -127,7 +197,7 @@ Click **Deploy** first to enable pointer-lock aiming and browser audio.
 
 Requirements:
 
-- Node.js **20.19.0 or newer**
+- Node.js **22.23.4 or a later 22.x release**
 - npm
 - A desktop browser with JavaScript, WebGL2, pointer lock, keyboard, and mouse
 
@@ -156,7 +226,7 @@ npm run build
 npx vite preview
 ```
 
-The ES2022 build is written to `dist/`, includes source maps, and separates
+The ES2022 build is written to `dist/` and separates
 Three.js into its own chunk.
 
 ## AI-agent-assisted development
@@ -184,6 +254,13 @@ screenshots and diagnostics, add deterministic regression coverage, then commit
 and push before beginning the next stage. Git history records the milestones;
 exact agent token totals and complete wall-clock time are not encoded in the
 repository, so they are not estimated here.
+
+The November 2026 update uses the public Claude Fable 5.2 demo Saltline as a
+reference for lighting, composition, interaction feedback, and level pacing.
+See the [comparison and implementation review](artifacts/saltline-comparison.md).
+The Ash Exchange follow-up added an in-engine opening composition, powered
+service shutters and a decoy the player can time. The Blender source script
+for the two exterior assets is [build-exchange-asset.py](scripts/build-exchange-asset.py).
 
 ## Architecture
 
@@ -225,11 +302,12 @@ material families. The full technical contract is in
 | Preset | Render scale | DPR cap | Shadow map | SSAO / bloom | Fog range |
 |---|---:|---:|---:|---|---:|
 | Low | 82% | 1.0 | 1024 | Off | 84 |
-| Medium | 100% | 1.25 | 1536 | On | 105 |
+| Medium | 100% | 1.25 | 1536 | Bloom | 105 |
 | High | 100% | 1.75 | 2048 | On, stronger bloom | 128 |
 
 Effect pools also respond to quality changes. Procedural material textures are
-128 px on Low and 256 px on Medium/High.
+128 px on Low and 256 px on Medium/High. The authored surfaces keep their
+baked resolution across presets. Medium is the default for normal play.
 
 ## Validation and evidence
 
@@ -242,12 +320,14 @@ npm run profile
 
 | Evidence | Result |
 |---|---|
-| Production build | Vite build succeeds with 47 transformed modules |
-| Contract and browser suite | **22/22 passed in 267.35 s** |
+| Production build | Vite build |
+| Contract and browser suite | See the linked smoke report |
 | Enemy AI contract | 35° cone boundary, 2–4 s reaction, aim lag, mixed spread hits/misses |
 | Physics contract | 10 high-wall, low-step, ceiling, airborne, landing, and controller cases |
 | Progression contract | Hostile storage input, monotonic records, deterministic operation seeds |
-| Full gameplay loop | Real two-way combat, victory, Operation 2 with 14 total / 12 active, defeat, restart |
+| Full gameplay loop | Relay progress, interruption, extraction, replay, plus sweep victory, scaling, and defeat |
+| Input | Short-click buffering, same-step aim, pointer lock, movement, stance, and reload |
+| Equipment | Store prices and limits, weapon feel, ammo retention, utility effects, and retry |
 | Browser diagnostics | Zero console errors, page errors, failed requests, or HTTP errors |
 | Capture set | 7 deterministic 1440×810 views with hashes and zero browser errors |
 
@@ -258,16 +338,16 @@ Evidence files:
 - [`artifacts/performance/moving-combat.json`](artifacts/performance/moving-combat.json)
 - [`artifacts/visual-review.md`](artifacts/visual-review.md)
 
-The recorded performance profile runs headless Chromium through SwiftShader
-software WebGL. It completed the full moving-combat workload but did **not**
-meet the 45 FPS target on that runner, so it is preserved as automation evidence
-rather than presented as representative hardware-GPU performance.
+The July moving-combat profile records the original SwiftShader run.
+See the comparison report for the hardware-GPU measurement conditions and
+the current build results.
 
 ### Reproducing selected evidence
 
 ```bash
 FPS_CAPTURE_VIEWS=wide-street,active-combat npm run capture
 FPS_BASE_URL=http://127.0.0.1:5173 npm test
+FPS_BROWSER_GPU=hardware npm test
 ```
 
 `FPS_CAPTURE_SEED`, `FPS_CAPTURE_DIR`, and the same `FPS_BASE_URL` override are
@@ -278,20 +358,18 @@ supported by the capture and profile scripts.
 
 - Desktop WebGL2 and pointer-lock controls are required; touch, gamepad, and
   accessibility-specific input modes are not implemented.
-- The game is single-player, single-map, and single-rifle. Operations scale on
-  the same authored district rather than adding new maps.
+- The game is single-player and takes place in Ash Market. Both modes share
+  the map and armory.
 - Highest-operation persistence stores no sensitive data and is not tamper-proof
   against DevTools, extensions, or local browser-profile modification.
 - Browser audio starts only after a user gesture.
 - Live quality switching does not regenerate procedural material textures.
-- The visual review found a coherent procedural prototype, but not professional
-  military-FPS art quality. Remaining weaknesses include simplified forms,
-  mannequin-like anatomy and hand contact, repetitive surfaces, and a few
-  visibly floating props.
+- The July [visual review](artifacts/visual-review.md) documents the original
+  prototype. The November comparison covers the current art and its remaining gaps.
 - Capture hashes document generated outputs; they are not pixel-diff regression
   tests.
 - Vite assumes root-path hosting. Subpath deployment requires an appropriate
   `base` setting.
-- No license has been granted in this repository.
+- See [LICENSE](LICENSE) for license terms.
 
 </details>

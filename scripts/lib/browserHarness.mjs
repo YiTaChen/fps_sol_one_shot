@@ -73,16 +73,19 @@ export async function ensureServer(baseURL = process.env.FPS_BASE_URL ?? DEFAULT
 }
 
 export async function launchBrowser(options = {}) {
+  const useHardware = process.env.FPS_BROWSER_GPU === 'hardware';
   const launchOptions = {
     headless: options.headless ?? true,
     args: [
-      '--use-angle=swiftshader',
+      ...(useHardware && process.platform === 'darwin' ? ['--use-angle=metal']
+        : useHardware ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']),
       '--enable-webgl',
       '--ignore-gpu-blocklist',
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
     ],
   };
+  if (useHardware) return chromium.launch({ ...launchOptions, channel: 'chrome' });
   try {
     return await chromium.launch(launchOptions);
   } catch (bundledError) {
@@ -141,7 +144,7 @@ export async function openGame(page, baseURL, options = {}) {
   await page.waitForFunction(
     () => Boolean(window.__FPS_TEST__?.ready?.()),
     undefined,
-    { timeout: 30000 },
+    { timeout: 60000 },
   );
   await page.evaluate(async () => {
     await window.__FPS_TEST__.captureReady?.();

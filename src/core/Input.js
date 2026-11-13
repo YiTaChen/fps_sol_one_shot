@@ -5,6 +5,16 @@ const BLOCKED_KEYS = new Set([
   "KeyD",
   "KeyQ",
   "KeyE",
+  "KeyF",
+  "KeyG",
+  "KeyB",
+  "KeyT",
+  "Digit1",
+  "Digit2",
+  "Digit3",
+  "Digit4",
+  "Digit5",
+  "Digit6",
   "KeyR",
   "KeyC",
   "ControlLeft",
@@ -46,11 +56,11 @@ export class InputManager {
       this.keys.add(event.code);
     }, options);
     window.addEventListener("keyup", (event) => {
-      if (BLOCKED_KEYS.has(event.code)) event.preventDefault();
+      if (this.enabled && BLOCKED_KEYS.has(event.code)) event.preventDefault();
       if (this.keys.delete(event.code)) this.justReleased.add(event.code);
     }, options);
     window.addEventListener("mousedown", (event) => {
-      if (!this.enabled) return;
+      if (!this.enabled || !this.locked) return;
       if (!this.buttons.has(event.button)) this.pressedButtons.add(event.button);
       this.buttons.add(event.button);
     }, options);
@@ -138,6 +148,10 @@ export class InputManager {
     return this.pressedButtons.has(button);
   }
 
+  consumeButtonPressed(button) {
+    return this.pressedButtons.delete(button);
+  }
+
   consumeLook(target = { x: 0, y: 0 }) {
     target.x = this.lookX;
     target.y = this.lookY;
@@ -159,6 +173,7 @@ export class InputManager {
    * exposes it only through the ?test=1 interface.
    */
   setSynthetic(record = {}) {
+    const previousKeys = new Set(this.syntheticKeys);
     this.syntheticKeys.clear();
     this.syntheticButtons.clear();
     const aliases = {
@@ -172,13 +187,17 @@ export class InputManager {
       reload: "KeyR",
       leanLeft: "KeyQ",
       leanRight: "KeyE",
+      interact: "KeyF",
+      decoy: "KeyG",
+      armory: "KeyB",
+      throw: "KeyT",
     };
     const keys = record.keys ?? record;
     for (const [name, value] of Object.entries(keys)) {
       if (!value) continue;
       const code = aliases[name] || name;
       if (/^(Key|Digit|Arrow|Shift|Control|Space)/.test(code)) {
-        if (!this.syntheticKeys.has(code)) this.justPressed.add(code);
+        if (!previousKeys.has(code)) this.justPressed.add(code);
         this.syntheticKeys.add(code);
       }
     }
